@@ -40,8 +40,10 @@ class ImageConversionSearchView(APIView):
             data = []
             for record in records:
                 data.append({
-                    "openid": record.openid,
-                    "prompt": record.prompt,
+                    # "openid": record.openid,
+                    "task_id": record.task_id,
+                    "status": record.status,
+                    # "prompt": record.prompt,
                     "url": record.url
                 })
             return Response(data, status=status.HTTP_200_OK)
@@ -50,7 +52,7 @@ class ImageConversionSearchView(APIView):
         
 
 class TaskStatusCheckView(APIView):
-    def get(self, task_id):
+    def get(self, request, task_id):
         try:
             task_result = ImageConversionRecord.objects.get(task_id=task_id)
             data = {

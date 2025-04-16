@@ -14,45 +14,6 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 @shared_task(bind=True)
-def call_third_party_api(self):
-    task_id = self.request.id.lower()
-    print('aorui:', task_id)
-    try:
-        # 创建任务记录，初始状态为 PENDING
-        task_result = TaskResult.objects.create(task_id=task_id)
-        print('aorui task_result:', task_result)
-        # 模拟调用第三方接口，等待 120 秒
-        time.sleep(120)
-        # 调用第三方接口
-        url = "http://127.0.0.1:8000/search/?format=json&openid=aorui123"  # 替换为实际的第三方接口 URL
-        response = requests.get(url)
-        if response.status_code == 200:
-            # 百度的 API 不会直接返回 JSON 格式数据，这里需要根据实际情况调整
-            result = response.text
-            # 更新任务状态为 SUCCESS，并保存结果
-            task_result.status = 'SUCCESS'
-            task_result.result = result
-            task_result.save()
-            return result
-        else:
-            # 更新任务状态为 FAILURE
-            task_result.status = 'FAILURE'
-            task_result.result = f"Request failed with status code {response.status_code}"
-            task_result.save()
-            return None
-    except Exception as e:
-        logger.error(f"Task {task_id} failed with error: {str(e)}", exc_info=True)
-        try:
-            task_result = TaskResult.objects.get(task_id=task_id)
-            task_result.status = 'FAILURE'
-            task_result.result = str(e)
-            task_result.save()
-        except TaskResult.DoesNotExist:
-            logger.error(f"Task {task_id} record not found in database when trying to save failure status.")
-        return None
-    
-
-@shared_task(bind=True)
 def create_image(self, openid, prompt, base64_image):
     task_id = self.request.id
 
