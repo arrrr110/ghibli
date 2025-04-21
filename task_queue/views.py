@@ -44,7 +44,8 @@ class ImageConversionSearchView(APIView):
                     "task_id": record.task_id,
                     "status": record.status,
                     # "prompt": record.prompt,
-                    "url": record.url
+                    "url": record.url,
+                    "record_time": record.record_time
                 })
             return Response(data, status=status.HTTP_200_OK)
         except Exception as e:
