@@ -140,7 +140,7 @@ CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 # Django设置时区需同时设置USE_TZ=True和TIME_ZONE = 'Asia/Shanghai'
 CELERY_TIMEZONE = TIME_ZONE
 # 为任务设置超时时间，单位秒。超时即中止，执行下个任务。
-CELERY_TASK_TIME_LIMIT = 180
+CELERY_TASK_TIME_LIMIT = 300
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
