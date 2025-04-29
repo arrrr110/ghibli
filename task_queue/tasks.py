@@ -7,7 +7,7 @@ from .models import TaskResult, ImageConversionRecord
 import re
 import os
 from dotenv import load_dotenv
-from .cloudbaseTools import WeixinCloudFunctionHelper
+from task_queue.cloudbaseTools import WeixinCloudFunctionHelper
 
 # 加载 .env 文件中的环境变量
 load_dotenv()
@@ -49,7 +49,7 @@ def create_image(self, openid, prompt, base64_image):
                 )
         # 构建请求参数
         data = {
-            "model": "gpt-4o-image-vip",
+            "model": os.getenv('model'),
             "messages": [
                 {
                     "role": "user",
