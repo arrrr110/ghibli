@@ -134,6 +134,7 @@ USE_TZ = True
 # 如果redis安装在本机，使用localhost
 # 如果docker部署的redis，使用redis://redis:6379
 CELERY_BROKER_URL = "redis://localhost:6379/0"
+# CELERY_BROKER_URL = "redis://127.0.0.1:6379/0" # 本地调试使用
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 # CELERY_RESULT_BACKEND = "django-db"
 # celery时区设置，建议与Django settings中TIME_ZONE同样时区，防止时差
@@ -155,19 +156,45 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{asctime} {levelname} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{asctime} {levelname} {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
-        'file': {
+        'error_file': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'filename': 'error.log',
+            'formatter': 'verbose',
+        },
+        'info_file': {
             'level': 'INFO',
             'class': 'logging.FileHandler',
-            'filename': 'api_access.log',
+            'filename': 'info.log',
+            'formatter': 'simple',
+        },
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
         },
     },
     'loggers': {
-        'task_queue.views': {
-            'handlers': ['file'],
+        '': {
+            'handlers': ['console', 'info_file', 'error_file'],
             'level': 'INFO',
-            'propagate': True,
+            'propagate': False,
+        },
+        'task_queue': {
+            'handlers': ['console', 'info_file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
         },
     },
-}
-
+}    

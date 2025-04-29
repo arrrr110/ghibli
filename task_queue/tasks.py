@@ -23,7 +23,6 @@ def post_to_cloudFunction(img_url, task_id):
         cloud_function_name=os.getenv('WEIXIN_CLOUD_FUNCTION_NAME')
     )
     result = helper.execute_cloud_function(img_url, task_id)
-    logger.info(f"Call cloudFunctions{result}", exc_info=True)
     return result
 
 @shared_task(bind=True)
@@ -32,8 +31,8 @@ def create_image(self, openid, prompt, base64_image):
 
     # 目标 URL
     url = os.getenv('url')
-    # APIkey
     APIkey = os.getenv('APIkey')
+    model = os.getenv('model')
     # 设置请求头，包含 APIkey
     headers = {
         "Authorization": APIkey,
@@ -49,7 +48,7 @@ def create_image(self, openid, prompt, base64_image):
                 )
         # 构建请求参数
         data = {
-            "model": os.getenv('model'),
+            "model": model,
             "messages": [
                 {
                     "role": "user",
@@ -84,7 +83,8 @@ def create_image(self, openid, prompt, base64_image):
                 task_result.url = url_link
                 task_result.save()
                 # 激活云函数，储存图片url
-                post_to_cloudFunction(url_link, task_id)
+                res = post_to_cloudFunction(url_link, task_id)
+                logger.info(f'call cloudfunction{res}', exc_info=True)
                 return url_link
             else:
                 task_result.status = 'FAILURE'

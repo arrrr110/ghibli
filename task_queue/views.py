@@ -7,7 +7,9 @@ from .models import ImageConversionRecord , TaskResult
 import re
 from django.http import JsonResponse
 from .tasks import create_image
+import logging
 
+logger = logging.getLogger(__name__)
 
 class ImageConversionView(APIView):
     def post(self, request):
@@ -27,6 +29,7 @@ class ImageConversionView(APIView):
 
         except Exception as e:
             # 处理其他未知异常
+            logger.error(f"An unexpected error occurred: {str(e)}", exc_info=True)
             return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ImageConversionSearchView(APIView):
@@ -62,4 +65,5 @@ class TaskStatusCheckView(APIView):
             }
             return Response(data, status=status.HTTP_200_OK)
         except TaskResult.DoesNotExist:
+            logger.error(f"An unexpected error occurred: {TaskResult}", exc_info=True)
             return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
