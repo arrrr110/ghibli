@@ -7,11 +7,23 @@ from .models import TaskResult, ImageConversionRecord
 import re
 import os
 from dotenv import load_dotenv
+from cloudbaseTools import WeixinCloudFunctionHelper
 
 # 加载 .env 文件中的环境变量
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+def post_to_cloudFunction(img_url, task_id):
+
+    helper = WeixinCloudFunctionHelper(
+        appid=os.getenv('WEIXIN_APPID'),
+        appsecret=os.getenv('WEIXIN_APPSECRET'),
+        env=os.getenv('WEIXIN_ENV'),
+        cloud_function_name=os.getenv('WEIXIN_CLOUD_FUNCTION_NAME')
+    )
+    result = helper.execute_cloud_function(img_url, task_id)
+    return result
 
 @shared_task(bind=True)
 def create_image(self, openid, prompt, base64_image):
@@ -70,7 +82,8 @@ def create_image(self, openid, prompt, base64_image):
                 url_link = match.group(0)
                 task_result.url = url_link
                 task_result.save()
-
+                # 激活云函数，储存图片url
+                post_to_cloudFunction(url_link, task_id)
                 return url_link
             else:
                 task_result.status = 'FAILURE'
