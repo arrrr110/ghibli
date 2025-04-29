@@ -7,7 +7,7 @@ from .models import TaskResult, ImageConversionRecord
 import re
 import os
 from dotenv import load_dotenv
-from cloudbaseTools import WeixinCloudFunctionHelper
+from .cloudbaseTools import WeixinCloudFunctionHelper
 
 # 加载 .env 文件中的环境变量
 load_dotenv()
