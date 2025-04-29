@@ -23,6 +23,7 @@ def post_to_cloudFunction(img_url, task_id):
         cloud_function_name=os.getenv('WEIXIN_CLOUD_FUNCTION_NAME')
     )
     result = helper.execute_cloud_function(img_url, task_id)
+    logger.info(f"Call cloudFunctions{result}", exc_info=True)
     return result
 
 @shared_task(bind=True)
