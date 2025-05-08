@@ -70,6 +70,7 @@ def create_image(self, openid, prompt, base64_image):
 
         # 发送 POST 请求
         response = requests.post(url, json=data, headers=headers)
+        # print('call back:',response)
         # 处理响应
         if response.status_code == 200:
             response_data = response.json()
@@ -84,8 +85,9 @@ def create_image(self, openid, prompt, base64_image):
                 task_result.save()
                 # 激活云函数，储存图片url
                 res = post_to_cloudFunction(url_link, task_id)
+                # print\logger\return 都打印在控制台
                 logger.info(f'call cloudfunction{res}', exc_info=True)
-                return url_link
+                return url_link 
             else:
                 task_result.status = 'FAILURE'
                 task_result.save()

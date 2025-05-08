@@ -1,0 +1,452 @@
+<!-- dashboard.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务统计图表</title>
+    <!-- 引入Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    <!-- 引入Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入Font Awesome -->
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    
+    <!-- 自定义Tailwind配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3B82F6',
+                        secondary: '#10B981',
+                        accent: '#F59E0B',
+                        danger: '#EF4444',
+                        dark: '#1E293B',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .card-shadow {
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            }
+            .transition-custom {
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .truncate-10 {
+                max-width: 10ch;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 顶部导航 -->
+    <header class="bg-white shadow-sm z-10">
+        <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+                <i class="fa fa-bar-chart text-primary text-2xl"></i>
+                <h1 class="text-xl font-bold text-dark">任务统计仪表盘</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="refresh-btn" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg transition-custom flex items-center">
+                    <i class="fa fa-refresh mr-2"></i>
+                    <span>刷新数据</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="container mx-auto px-4 py-8">
+        <!-- 统计卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div id="total-tasks-card" class="bg-white rounded-xl p-6 card-shadow hover:shadow-lg transition-custom border-l-4 border-primary">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-gray-500 text-sm">总任务数</p>
+                        <h3 class="text-3xl font-bold text-dark mt-1">--</h3>
+                    </div>
+                    <div class="bg-primary/10 p-3 rounded-lg">
+                        <i class="fa fa-tasks text-primary text-xl"></i>
+                    </div>
+                </div>
+                <div class="mt-4 flex items-center text-sm">
+                    <span id="total-change" class="text-green-500 flex items-center">
+                        <i class="fa fa-arrow-up mr-1"></i> 0%
+                    </span>
+                    <span class="text-gray-500 ml-2">相比昨日</span>
+                </div>
+            </div>
+            
+            <div id="success-tasks-card" class="bg-white rounded-xl p-6 card-shadow hover:shadow-lg transition-custom border-l-4 border-secondary">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-gray-500 text-sm">成功任务</p>
+                        <h3 class="text-3xl font-bold text-dark mt-1">--</h3>
+                    </div>
+                    <div class="bg-secondary/10 p-3 rounded-lg">
+                        <i class="fa fa-check-circle text-secondary text-xl"></i>
+                    </div>
+                </div>
+                <div class="mt-4 flex items-center text-sm">
+                    <span id="success-rate" class="text-green-500 flex items-center">
+                        <i class="fa fa-arrow-up mr-1"></i> 0%
+                    </span>
+                    <span class="text-gray-500 ml-2">成功率</span>
+                </div>
+            </div>
+            
+            <div id="failed-tasks-card" class="bg-white rounded-xl p-6 card-shadow hover:shadow-lg transition-custom border-l-4 border-danger">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-gray-500 text-sm">失败任务</p>
+                        <h3 class="text-3xl font-bold text-dark mt-1">--</h3>
+                    </div>
+                    <div class="bg-danger/10 p-3 rounded-lg">
+                        <i class="fa fa-times-circle text-danger text-xl"></i>
+                    </div>
+                </div>
+                <div class="mt-4 flex items-center text-sm">
+                    <span id="failed-change" class="text-red-500 flex items-center">
+                        <i class="fa fa-arrow-up mr-1"></i> 0%
+                    </span>
+                    <span class="text-gray-500 ml-2">相比昨日</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 图表区域 -->
+        <div class="bg-white rounded-xl p-6 card-shadow mb-8">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-dark">最近10日任务统计</h2>
+            </div>
+            <div class="h-[400px] w-full">
+                <canvas id="taskChart"></canvas>
+            </div>
+        </div>
+        
+        <!-- 最近任务列表 -->
+        <div class="bg-white rounded-xl p-6 card-shadow">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-dark">最近任务</h2>
+                <a href="https://gbl.ynaxa.cn/admin/task_queue/imageconversionrecord/">
+                    <button class="text-primary hover:text-primary/80 flex items-center transition-custom">
+                        <span>查看全部</span>
+                        <i class="fa fa-chevron-right ml-1 text-xs"></i>
+                    </button>
+                </a>
+
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead>
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">任务ID</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">时间</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recent-tasks" class="bg-white divide-y divide-gray-200">
+                        <!-- 表格内容由JavaScript动态生成 -->
+                        <tr class="text-center">
+                            <td colspan="4" class="px-6 py-12 text-gray-500">
+                                <i class="fa fa-spinner fa-spin mr-2"></i>加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="bg-white border-t border-gray-200 mt-12">
+        <div class="container mx-auto px-4 py-6">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <div class="text-gray-500 text-sm mb-4 md:mb-0">
+                    © 2025 任务统计仪表盘. 保留所有权利.
+                </div>
+                <div class="flex space-x-6">
+                    <a href="#" class="text-gray-500 hover:text-primary transition-custom">
+                        <i class="fa fa-question-circle"></i> 帮助
+                    </a>
+                    <a href="#" class="text-gray-500 hover:text-primary transition-custom">
+                        <i class="fa fa-cog"></i> 设置
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // 初始化Chart.js图表
+        let taskChart = null;
+
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            // 解析视图函数传递的数据
+            const taskData = `
+2025-04-28: SUCCESS=0, FAILURE=0
+2025-04-29: SUCCESS=0, FAILURE=0
+2025-04-30: SUCCESS=7, FAILURE=1
+2025-05-01: SUCCESS=5, FAILURE=0
+2025-05-02: SUCCESS=22, FAILURE=0
+2025-05-03: SUCCESS=22, FAILURE=5
+2025-05-04: SUCCESS=2, FAILURE=3
+2025-05-05: SUCCESS=32, FAILURE=2
+2025-05-06: SUCCESS=10, FAILURE=3
+2025-05-07: SUCCESS=3, FAILURE=0
+`;
+
+            // 解析日期统计数据
+            const lines = taskData.trim().split('\n');
+            const labels = [];
+            const totalTasks = [];
+            const successTasks = [];
+            const failedTasks = [];
+
+            lines.forEach(line => {
+                const [dateStr, statsStr] = line.split(': ');
+                const date = dateStr;
+                const [successStr, failureStr] = statsStr.split(', ');
+                const success = parseInt(successStr.split('=')[1]);
+                const failure = parseInt(failureStr.split('=')[1]);
+                const total = success + failure;
+
+                labels.push(date);
+                totalTasks.push(total);
+                successTasks.push(success);
+                failedTasks.push(failure);
+            });
+
+            const chartData = {
+                labels: labels,
+                datasets: [
+                    {
+                        label: "总任务数",
+                        data: totalTasks,
+                        backgroundColor: "rgba(59, 130, 246, 0.5)",
+                        borderColor: "rgba(59, 130, 246, 1)",
+                        borderWidth: 1
+                    },
+                    {
+                        label: "成功任务",
+                        data: successTasks,
+                        backgroundColor: "rgba(16, 185, 129, 0.5)",
+                        borderColor: "rgba(16, 185, 129, 1)",
+                        borderWidth: 1
+                    },
+                    {
+                        label: "失败任务",
+                        data: failedTasks,
+                        backgroundColor: "rgba(239, 68, 68, 0.5)",
+                        borderColor: "rgba(239, 68, 68, 1)",
+                        borderWidth: 1
+                    }
+                ]
+            };
+
+            // 渲染最近任务列表
+            const recentTasks = {{ recent_tasks|safe }};
+            renderRecentTasks(recentTasks);
+
+            // 更新统计卡片
+            updateStatsCards(chartData);
+
+            // 渲染图表
+            renderChart(chartData);
+
+            // 为刷新按钮添加点击事件
+            document.getElementById('refresh-btn').addEventListener('click', function() {
+                // 添加加载动画
+                this.innerHTML = '<i class="fa fa-spinner fa-spin mr-2"></i><span>刷新中...</span>';
+                this.disabled = true;
+
+                // 重新加载数据
+                updateStatsCards(chartData);
+                renderChart(chartData);
+                renderRecentTasks(recentTasks);
+
+                // 1秒后恢复按钮状态
+                setTimeout(() => {
+                    this.innerHTML = '<i class="fa fa-refresh mr-2"></i><span>刷新数据</span>';
+                    this.disabled = false;
+                }, 1000);
+            });
+        });
+
+       // 渲染最近任务列表
+       function renderRecentTasks(tasks) {
+            const taskListEl = document.getElementById('recent-tasks');
+            taskListEl.innerHTML = '';
+            
+            if (tasks.length === 0) {
+                taskListEl.innerHTML = `
+                    <tr class="text-center">
+                        <td colspan="4" class="px-6 py-12 text-gray-500">
+                            暂无任务记录
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            tasks.forEach(task => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition-custom';
+                // 假设主键字段名为 id
+                const detailUrl = `https://gbl.ynaxa.cn/admin/task_queue/imageconversionrecord/${task.id}/change/`;
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="text-sm font-medium text-gray-900 truncate-10" title="${task.task_id}">${task.task_id}</div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${task.status_label.class}">
+                            <i class="fa ${task.status_label.icon} mr-1"></i> ${task.status}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        ${task.record_time}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-primary">
+                        <a href="${detailUrl}" class="hover:text-primary/80 transition-custom">
+                            <i class="fa fa-eye mr-1"></i> 查看详情
+                        </a>
+                    </td>
+                `;
+                taskListEl.appendChild(row);
+            });
+        }
+        // 渲染图表
+        function renderChart(data) {
+            const ctx = document.getElementById('taskChart').getContext('2d');
+
+            // 如果图表已存在，销毁它
+            if (taskChart) {
+                taskChart.destroy();
+            }
+
+            // 创建新图表
+            taskChart = new Chart(ctx, {
+                type: 'bar',
+                data: data,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y;
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                borderDash: [2, 4],
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            }
+                        }
+                    },
+                    animation: {
+                        duration: 1000,
+                        easing: 'easeOutQuart'
+                    }
+                }
+            });
+        }
+
+        // 更新统计卡片
+        function updateStatsCards(data) {
+            // 获取最新一天的数据
+            const latestData = data.datasets.map(dataset => dataset.data[dataset.data.length - 1]);
+            const prevDayData = data.datasets.map(dataset => dataset.data[dataset.data.length - 2] || 0);
+
+            // 更新总任务数卡片
+            const totalTasks = latestData[0];
+            const prevTotalTasks = prevDayData[0];
+            document.querySelector('#total-tasks-card h3').textContent = totalTasks;
+
+            // 计算变化百分比
+            const totalChangePercent = prevTotalTasks > 0 
+                ? Math.round(((totalTasks - prevTotalTasks) / prevTotalTasks) * 100) 
+                : 100;
+
+            const totalChangeEl = document.querySelector('#total-change');
+            totalChangeEl.innerHTML = `${totalChangePercent >= 0 ? '<i class="fa fa-arrow-up mr-1"></i>' : '<i class="fa fa-arrow-down mr-1"></i>'} ${Math.abs(totalChangePercent)}%`;
+
+            if (totalChangePercent >= 0) {
+                totalChangeEl.classList.remove('text-red-500');
+                totalChangeEl.classList.add('text-green-500');
+            } else {
+                totalChangeEl.classList.remove('text-green-500');
+                totalChangeEl.classList.add('text-red-500');
+            }
+
+            // 更新成功任务卡片
+            const successTasks = latestData[1];
+            document.querySelector('#success-tasks-card h3').textContent = successTasks;
+
+            // 计算成功率
+            const successRate = totalTasks > 0 ? Math.round((successTasks / totalTasks) * 100) : 0;
+            document.querySelector('#success-rate').textContent = `${successRate}%`;
+
+            // 更新失败任务卡片
+            const failedTasks = latestData[2];
+            const prevFailedTasks = prevDayData[2];
+            document.querySelector('#failed-tasks-card h3').textContent = failedTasks;
+
+            // 计算变化百分比
+            const failedChangePercent = prevFailedTasks > 0 
+                ? Math.round(((failedTasks - prevFailedTasks) / prevFailedTasks) * 100) 
+                : 100;
+
+            const failedChangeEl = document.querySelector('#failed-change');
+            failedChangeEl.innerHTML = `${failedChangePercent >= 0 ? '<i class="fa fa-arrow-up mr-1"></i>' : '<i class="fa fa-arrow-down mr-1"></i>'} ${Math.abs(failedChangePercent)}%`;
+
+            if (failedChangePercent >= 0) {
+                failedChangeEl.classList.remove('text-green-500');
+                failedChangeEl.classList.add('text-red-500');
+            } else {
+                failedChangeEl.classList.remove('text-red-500');
+                failedChangeEl.classList.add('text-green-500');
+            }
+        }
+
+    </script>
+</body>
+</html>

@@ -1,12 +1,47 @@
 from django.contrib import admin
 from .models import ImageConversionRecord, TaskResult
+from django.utils.html import format_html
+
+admin.site.site_header = "吉卜力生图AI"
+admin.site.site_title = "吉卜力生图"
+
 
 class ImageConversionRecordAdmin(admin.ModelAdmin):
-    # 定义在admin列表页面显示的字段
-    list_display = ('openid', 'task_id', 'status')
-    # 定义默认排序方式，'-record_time'表示按record_time字段降序排列
-    ordering = ('-record_time',)
+    list_display = ("openid", "status", "show_image_mini")
+    ordering = ("-record_time",)
+    readonly_fields = ("show_image",)
 
-# 注册模型和对应的ModelAdmin类
+    def show_image(self, obj):
+        return format_html('<img src="{}" width="200" />', obj.url)
+
+    def show_image_mini(self, obj):
+        return format_html('<img src="{}" width="20" />', obj.url)
+
+    show_image.short_description = "图片预览"
+
+
 admin.site.register(ImageConversionRecord, ImageConversionRecordAdmin)
-# admin.site.register(TaskResult)
+
+
+# test
+@admin.register(TaskResult)
+class AuthorAdmin(admin.ModelAdmin):
+    # list show
+    list_display = ["task_id", "status", "result", "view_result_id"]
+    # detail show / in one line
+    fields = (("task_id", "status"), "result", "view_result_id")
+    # bottom show on bottom
+    actions_on_bottom = True
+    # date_hierarchy = 'pub_date'
+    empty_value_display = "-empty-"
+
+    readonly_fields = ("view_result_id",)
+
+    def view_result_id(self, obj):
+        return obj.result
+
+    view_result_id.empty_value_display = "???"
+    view_result_id.short_description = "一个函数，接收模型实例作为参数"
+
+
+# admin.site.register(TaskResult, AuthorAdmin)

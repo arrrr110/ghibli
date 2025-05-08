@@ -131,12 +131,12 @@ USE_TZ = True
 
 # Celery配置
 # 最重要的配置，设置消息broker,格式为：db://user:password@host:port/dbname
-# 如果redis安装在本机，使用localhost
 # 如果docker部署的redis，使用redis://redis:6379
-CELERY_BROKER_URL = "redis://localhost:6379/0"
+# 关键：win本地调试必须明确IP，server上则设置为local
 # CELERY_BROKER_URL = "redis://127.0.0.1:6379/0" # 本地调试使用
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
-# CELERY_RESULT_BACKEND = "django-db"
+# CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/1'
+CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/1'
 # celery时区设置，建议与Django settings中TIME_ZONE同样时区，防止时差
 # Django设置时区需同时设置USE_TZ=True和TIME_ZONE = 'Asia/Shanghai'
 CELERY_TIMEZONE = TIME_ZONE

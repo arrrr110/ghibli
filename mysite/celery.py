@@ -1,6 +1,6 @@
 import os
 from celery import Celery
-
+from time import sleep
 # 设置环境变量
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'mysite.settings')
 
@@ -17,4 +17,4 @@ app.autodiscover_tasks()
 # 一个测试任务
 @app.task(bind=True)
 def debug_task(self):
-    print(f'Request: {self.request!r}')
+    print(f'debug_Request: {self.request.id!r}')
