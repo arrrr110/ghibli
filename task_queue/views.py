@@ -113,7 +113,7 @@ def dashboard(request):
 
         daily_counts.append(
             {
-                "date": day.date(),
+                "date": day.date().strftime('%Y-%m-%d'),  # 将日期格式化为字符串,
                 "success_count": success_count,
                 "failure_count": failure_count,
             }
@@ -135,7 +135,7 @@ def dashboard(request):
             }
         )
 
-    print(task_list)
+    print(daily_counts)
     return render(
         request,
         "dashboard.html",

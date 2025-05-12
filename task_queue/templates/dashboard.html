@@ -11,7 +11,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入Font Awesome -->
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    
+
     <!-- 自定义Tailwind配置 -->
     <script>
         tailwind.config = {
@@ -193,38 +193,26 @@
     </footer>
 
     <script>
+
         // 初始化Chart.js图表
         let taskChart = null;
 
         // 页面加载完成后执行
-        document.addEventListener('DOMContentLoaded', function() {
-            // 解析视图函数传递的数据
-            const taskData = `
-2025-04-28: SUCCESS=0, FAILURE=0
-2025-04-29: SUCCESS=0, FAILURE=0
-2025-04-30: SUCCESS=7, FAILURE=1
-2025-05-01: SUCCESS=5, FAILURE=0
-2025-05-02: SUCCESS=22, FAILURE=0
-2025-05-03: SUCCESS=22, FAILURE=5
-2025-05-04: SUCCESS=2, FAILURE=3
-2025-05-05: SUCCESS=32, FAILURE=2
-2025-05-06: SUCCESS=10, FAILURE=3
-2025-05-07: SUCCESS=3, FAILURE=0
-`;
+        document.addEventListener('DOMContentLoaded', function () {
+            // 从Django视图函数获取的数据
+            const dailyCounts = {{ daily_counts|safe }};
+            const recentTasks = {{ recent_tasks|safe }};
 
             // 解析日期统计数据
-            const lines = taskData.trim().split('\n');
             const labels = [];
             const totalTasks = [];
             const successTasks = [];
             const failedTasks = [];
 
-            lines.forEach(line => {
-                const [dateStr, statsStr] = line.split(': ');
-                const date = dateStr;
-                const [successStr, failureStr] = statsStr.split(', ');
-                const success = parseInt(successStr.split('=')[1]);
-                const failure = parseInt(failureStr.split('=')[1]);
+            dailyCounts.forEach(item => {
+                const date = item.date;
+                const success = item.success_count;
+                const failure = item.failure_count;
                 const total = success + failure;
 
                 labels.push(date);
@@ -261,7 +249,7 @@
             };
 
             // 渲染最近任务列表
-            const recentTasks = {{ recent_tasks|safe }};
+            // const recentTasks = {{ recent_tasks|safe }};
             renderRecentTasks(recentTasks);
 
             // 更新统计卡片
