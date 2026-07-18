@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import ImageConversionView , ImageConversionSearchView, TaskStatusCheckView, dashboard
+from .views import ImageConversionView, ImageConversionSearchView, TaskStatusCheckView, dashboard
 
 urlpatterns = [
     path('convert-image/', ImageConversionView.as_view(), name='convert-image'),
