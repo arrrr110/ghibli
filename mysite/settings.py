@@ -37,6 +37,7 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
 INSTALLED_APPS = [
     'users.apps.UsersConfig',
     'task_queue.apps.TaskQueueConfig',
+    'neighbor_hub.apps.NeighborHubConfig',
     'rest_framework',
     'rest_framework_simplejwt',
     'django.contrib.admin',
@@ -59,11 +60,13 @@ MIDDLEWARE = [
 
 # REST Framework 配置
 REST_FRAMEWORK = {
-    # Use Django's standard `django.contrib.auth` permissions,
-    # or allow read-only access for unauthenticated users.
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
     'DEFAULT_PERMISSION_CLASSES': [
-        # 'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly'
-    ]
+        'rest_framework.permissions.IsAuthenticated',
+    ],
 }
 
 # JWT 配置 (为后续统一用户系统准备)

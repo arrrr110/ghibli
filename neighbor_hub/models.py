@@ -1,0 +1,343 @@
+import uuid
+from django.db import models
+from django.conf import settings
+from django.core.validators import MinLengthValidator
+from django.utils import timezone
+
+
+class Community(models.Model):
+    """小区/社区"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, verbose_name="小区名称")
+    address = models.CharField(max_length=255, verbose_name="小区地址")
+    description = models.TextField(blank=True, verbose_name="小区描述")
+    is_active = models.BooleanField(default=True, verbose_name="是否激活")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='created_communities'
+    )
+    extra_data = models.JSONField(default=dict, blank=True, verbose_name="扩展数据")
+    established_at = models.DateField(null=True, blank=True, verbose_name="建成日期")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_communities'
+        verbose_name = '小区'
+        verbose_name_plural = verbose_name
+    
+    def __str__(self):
+        return self.name
+
+
+class NeighborHubProfile(models.Model):
+    """用户在 neighbor_hub 应用中的专属 Profile"""
+    
+    class Role(models.TextChoices):
+        OWNER = 'owner', '业主'
+        COMMITTEE = 'committee', '业委会'
+        PROPERTY = 'property', '物业'
+        UNVERIFIED = 'unverified', '待认证'
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='neighbor_hub_profile'
+    )
+    community = models.ForeignKey(
+        Community,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='members',
+        verbose_name="所属小区"
+    )
+    role = models.CharField(
+        max_length=20, choices=Role.choices,
+        default=Role.UNVERIFIED, verbose_name="角色"
+    )
+    building = models.CharField(max_length=50, blank=True, verbose_name="楼号")
+    bio = models.CharField(max_length=200, blank=True, verbose_name="个人简介")
+    
+    # 认证状态
+    is_verified = models.BooleanField(default=False, verbose_name="已认证")
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='verified_users'
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    verification_note = models.CharField(max_length=255, blank=True)
+    
+    # 邀请关系
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='invitees'
+    )
+    
+    is_active = models.BooleanField(default=True)
+    extra_data = models.JSONField(default=dict, blank=True)
+    last_login_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_profiles'
+        verbose_name = '用户档案'
+        verbose_name_plural = verbose_name
+    
+    def __str__(self):
+        return f"{self.user} @ {self.community}"
+    
+    def verify(self, committee_user, note=''):
+        """业委会认证用户"""
+        self.is_verified = True
+        self.role = self.Role.OWNER
+        self.verified_by = committee_user
+        self.verified_at = timezone.now()
+        self.verification_note = note
+        self.save()
+
+
+class Topic(models.Model):
+    """小区治理话题"""
+    
+    class Status(models.TextChoices):
+        ACTIVE = 'active', '进行中'
+        CLOSED = 'closed', '已结束'
+        PENDING = 'pending', '待审核'
+        REJECTED = 'rejected', '已拒绝'
+    
+    class Category(models.TextChoices):
+        FACILITY = 'facility', '设施改造'
+        NOTICE = 'notice', '物业通知'
+        NEIGHBOR = 'neighbor', '邻里关系'
+        ENVIRONMENT = 'environment', '环境治理'
+        REPAIR = 'repair', '设施维修'
+        HELP = 'help', '邻里互助'
+        ANNOUNCEMENT = 'announcement', '业委会公告'
+        ACTIVITY = 'activity', '社区活动'
+        DISPUTE = 'dispute', '邻里纠纷'
+        OTHER = 'other', '其他'
+    
+    class PosterStyle(models.TextChoices):
+        GRADIENT = 'gradient', '渐变'
+        EMOJI = 'emoji', '表情'
+        MINIMAL = 'minimal', '简约'
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name='topics')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='topics')
+    author_building = models.CharField(max_length=50, verbose_name="作者楼号")
+    author_role = models.CharField(max_length=20, choices=NeighborHubProfile.Role.choices)
+    
+    title = models.CharField(max_length=100, validators=[MinLengthValidator(2)])
+    content = models.TextField()
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
+    
+    has_image = models.BooleanField(default=False)
+    image_url = models.URLField(blank=True)
+    poster_style = models.CharField(max_length=10, choices=PosterStyle.choices, default=PosterStyle.MINIMAL)
+    
+    # 统计数据
+    likes_count = models.PositiveIntegerField(default=0)
+    comments_count = models.PositiveIntegerField(default=0)
+    views_count = models.PositiveIntegerField(default=0)
+    
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    is_pinned = models.BooleanField(default=False, verbose_name="置顶")
+    extra_data = models.JSONField(default=dict, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_topics'
+        ordering = ['-is_pinned', '-created_at']
+        verbose_name = '话题'
+        verbose_name_plural = verbose_name
+    
+    def __str__(self):
+        return self.title
+
+
+class Comment(models.Model):
+    """话题评论"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='comments')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='comments')
+    author_building = models.CharField(max_length=50)
+    author_role = models.CharField(max_length=20, choices=NeighborHubProfile.Role.choices)
+    
+    parent = models.ForeignKey(
+        'self', on_delete=models.CASCADE,
+        null=True, blank=True, related_name='replies'
+    )
+    
+    content = models.TextField(max_length=1000)
+    likes_count = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_comments'
+        ordering = ['-created_at']
+        verbose_name = '评论'
+        verbose_name_plural = verbose_name
+    
+    def __str__(self):
+        return f"{self.author}: {self.content[:30]}"
+
+
+class TopicLike(models.Model):
+    """话题点赞记录"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='topic_likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_topic_likes'
+        unique_together = ['topic', 'user']
+        verbose_name = '话题点赞'
+        verbose_name_plural = verbose_name
+
+
+class TopicSubscription(models.Model):
+    """话题订阅记录"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='subscriptions')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='topic_subscriptions')
+    has_update = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_topic_subscriptions'
+        unique_together = ['topic', 'user']
+        verbose_name = '话题订阅'
+        verbose_name_plural = verbose_name
+
+
+class Invitation(models.Model):
+    """邀请记录"""
+    
+    class Status(models.TextChoices):
+        PENDING = 'pending', '待接受'
+        ACCEPTED = 'accepted', '已接受'
+        EXPIRED = 'expired', '已过期'
+        CANCELLED = 'cancelled', '已取消'
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    inviter = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_invitations'
+    )
+    inviter_community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name='sent_invitations')
+    invitee_phone = models.CharField(max_length=20)
+    invitee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='received_invitations'
+    )
+    invitee_name = models.CharField(max_length=50, blank=True)
+    code = models.CharField(max_length=20, unique=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_invitations'
+        ordering = ['-created_at']
+        verbose_name = '邀请记录'
+        verbose_name_plural = verbose_name
+    
+    def __str__(self):
+        return f"{self.inviter} -> {self.invitee_phone}"
+
+
+class VerificationRequest(models.Model):
+    """身份认证申请"""
+    
+    class Status(models.TextChoices):
+        PENDING = 'pending', '待审核'
+        APPROVED = 'approved', '已通过'
+        REJECTED = 'rejected', '已拒绝'
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='verification_requests'
+    )
+    community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name='verification_requests')
+    name = models.CharField(max_length=50)
+    phone = models.CharField(max_length=20)
+    building = models.CharField(max_length=50)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='reviewed_requests'
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_verification_requests'
+        ordering = ['-created_at']
+        verbose_name = '认证申请'
+        verbose_name_plural = verbose_name
+    
+    def __str__(self):
+        return f"{self.name} - {self.get_status_display()}"
+    
+    def approve(self, committee_user, note=''):
+        """通过认证"""
+        self.status = self.Status.APPROVED
+        self.reviewed_by = committee_user
+        self.reviewed_at = timezone.now()
+        self.review_note = note
+        self.save()
+        # 更新用户 Profile
+        if hasattr(self.user, 'neighbor_hub_profile'):
+            self.user.neighbor_hub_profile.verify(committee_user, note)
+
+
+class AppNotification(models.Model):
+    """应用内通知"""
+    
+    class Type(models.TextChoices):
+        SYSTEM = 'system', '系统通知'
+        TOPIC_REPLY = 'topic_reply', '话题回复'
+        TOPIC_LIKE = 'topic_like', '话题点赞'
+        VERIFICATION = 'verification', '认证通知'
+        INVITATION = 'invitation', '邀请通知'
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notifications')
+    type = models.CharField(max_length=20, choices=Type.choices)
+    title = models.CharField(max_length=100)
+    content = models.TextField()
+    related_id = models.CharField(max_length=50, blank=True)
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_notifications'
+        ordering = ['-created_at']
+        verbose_name = '应用通知'
+        verbose_name_plural = verbose_name
+    
+    def __str__(self):
+        return f"{self.user}: {self.title}"
