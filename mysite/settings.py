@@ -64,8 +64,14 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
+    # 默认权限：允许匿名访问（敏感接口单独设置 IsAuthenticated）
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+        'rest_framework.permissions.AllowAny',
+    ],
+    # 启用浏览器友好的 API 界面（带表单）
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+        'rest_framework.renderers.BrowsableAPIRenderer',
     ],
 }
 
@@ -234,4 +240,19 @@ LOGGING = {
             'propagate': False,
         },
     },
-}    
+}
+
+# ============================================
+# 阿里云短信认证服务 (dypnsapi) 配置
+# ============================================
+# 文档: https://help.aliyun.com/zh/pnvs/
+# SDK: https://github.com/aliyun/alibabacloud-python-sdk/tree/master/dypnsapi-20170525
+
+# AccessKey（从环境变量读取）
+ALIBABA_CLOUD_ACCESS_KEY_ID = os.getenv('ALIBABA_CLOUD_ACCESS_KEY_ID', '')
+ALIBABA_CLOUD_ACCESS_KEY_SECRET = os.getenv('ALIBABA_CLOUD_ACCESS_KEY_SECRET', '')
+
+# 短信签名和模板（在阿里云控制台配置）
+ALIYUN_SMS_SIGN_NAME = os.getenv('ALIYUN_SMS_SIGN_NAME', '恒创联众')
+ALIYUN_SMS_TEMPLATE_CODE = os.getenv('ALIYUN_SMS_TEMPLATE_CODE', '100001')
+ALIYUN_SMS_SOURCE_IP = os.getenv('ALIYUN_SMS_SOURCE_IP', '2409:8a1e:70b1:ee70:9d10:45f3:7c89:6c2f')    

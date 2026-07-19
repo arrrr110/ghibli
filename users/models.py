@@ -66,12 +66,12 @@ class UserAppProfile(models.Model):
         db_index=True,
     )
     
-    # 各应用自己的用户标识（如 openid、third_party_id 等）
+    # 各应用自己的用户标识
     app_user_id = models.CharField(
         max_length=100, 
         blank=True, 
         verbose_name="应用侧用户ID",
-        help_text="应用自己体系的用户标识，如微信 openid",
+        help_text="应用自己体系的用户标识",
     )
     
     # 用户在应用内的状态
@@ -171,7 +171,6 @@ class LoginRecord(models.Model):
     
     LOGIN_TYPE_CHOICES = [
         ('phone_code', '手机验证码'),
-        ('wechat_openid', '微信小程序'),
         ('username_password', '账号密码'),
     ]
     login_type = models.CharField(
