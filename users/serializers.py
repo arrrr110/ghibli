@@ -28,7 +28,7 @@ class SendSmsCodeSerializer(serializers.Serializer):
 class PhoneCodeLoginSerializer(serializers.Serializer):
     """手机号统一登录（登录 + 自动注册）"""
     phone = serializers.CharField(max_length=11, help_text='11位手机号')
-    code = serializers.CharField(max_length=6, help_text='6位短信验证码')
+    code = serializers.CharField(max_length=4, help_text='4位短信验证码')
     app_name = serializers.CharField(default='neighbor_hub', help_text='应用标识（默认 neighbor_hub）')
 
 

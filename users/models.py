@@ -108,61 +108,6 @@ class UserAppProfile(models.Model):
         self.save()
 
 
-class VerificationCode(models.Model):
-    """
-    手机验证码
-    """
-    
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    phone = models.CharField(
-        max_length=20, 
-        verbose_name="手机号",
-        db_index=True,
-    )
-    code = models.CharField(max_length=6, verbose_name="验证码")
-    
-    # 验证码用途
-    PURPOSE_CHOICES = [
-        ('register', '注册'),
-        ('login', '登录'),
-        ('reset_password', '重置密码'),
-        ('bind_phone', '绑定手机'),
-    ]
-    purpose = models.CharField(
-        max_length=20, 
-        choices=PURPOSE_CHOICES,
-        verbose_name="用途"
-    )
-    
-    # 状态
-    is_used = models.BooleanField(default=False, verbose_name="已使用")
-    used_at = models.DateTimeField(null=True, blank=True, verbose_name="使用时间")
-    
-    # 有效期
-    expires_at = models.DateTimeField(verbose_name="过期时间")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
-    
-    class Meta:
-        db_table = 'verification_codes'
-        verbose_name = '验证码'
-        verbose_name_plural = verbose_name
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['phone', 'purpose', 'is_used']),
-        ]
-    
-    def __str__(self):
-        return f"{self.phone} - {self.get_purpose_display()}"
-    
-    @property
-    def is_expired(self):
-        return timezone.now() > self.expires_at
-    
-    @property
-    def is_valid(self):
-        return not self.is_used and not self.is_expired
-
-
 class LoginRecord(models.Model):
     """
     登录记录

@@ -114,7 +114,7 @@
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `phone` | string | 是 | 11 位手机号 |
-| `code` | string | 是 | 6 位短信验证码 |
+| `code` | string | 是 | 4 位短信验证码 |
 | `app_name` | string | 否 | 应用标识，默认 `neighbor_hub` |
 
 #### 请求示例
@@ -122,7 +122,7 @@
 ```json
 {
     "phone": "1*********0",
-    "code": "123456",
+    "code": "1234",
     "app_name": "neighbor_hub"
 }
 ```
@@ -298,17 +298,6 @@ Authorization: Bearer <access_token>
 | `app_name` | string | 应用标识 |
 | `is_active` | bool | 是否激活（软删除标记） |
 | `extra_data` | JSON | 扩展数据 |
-
-### VerificationCode（验证码）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | UUID | 主键 |
-| `phone` | string | 手机号 |
-| `code` | string | 验证码（6位） |
-| `purpose` | string | 用途 |
-| `is_used` | bool | 已使用 |
-| `expires_at` | datetime | 过期时间 |
 
 ### LoginRecord（登录记录）
 

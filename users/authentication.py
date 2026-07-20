@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User, UserAppProfile, VerificationCode, LoginRecord
+from .models import User, UserAppProfile, LoginRecord
 from .serializers import (
     SendSmsCodeSerializer,
     PhoneCodeLoginSerializer,
@@ -82,6 +82,7 @@ class SendSmsCodeView(APIView):
       - purpose: 用途（可选，默认 login）
     """
     permission_classes = [AllowAny]
+    authentication_classes = []
     serializer_class = SendSmsCodeSerializer
 
     def post(self, request):
@@ -95,19 +96,7 @@ class SendSmsCodeView(APIView):
         phone = serializer.validated_data['phone']
         purpose = serializer.validated_data.get('purpose', 'login')
 
-        # 频率限制：60秒内只能发送一次
-        one_min_ago = timezone.now() - timedelta(minutes=1)
-        recent_sent = VerificationCode.objects.filter(
-            phone=phone,
-            purpose=purpose,
-            created_at__gte=one_min_ago
-        ).exists()
-
-        if recent_sent:
-            return Response(
-                {'error': '请求过于频繁，请稍后再试'},
-                status=status.HTTP_429_TOO_MANY_REQUESTS
-            )
+        # 验证码发送由阿里云服务统一管控
 
         # 使用"##code##"替代，由参数 CodeType 指定验证码生成规则；
         code = "##code##"
@@ -143,6 +132,7 @@ class PhoneLoginView(APIView):
     功能：如果手机号不存在则自动注册并登录，如果存在则直接登录。
     """
     permission_classes = [AllowAny]
+    authentication_classes = []
     serializer_class = PhoneCodeLoginSerializer
 
     def post(self, request):

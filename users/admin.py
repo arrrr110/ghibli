@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, UserAppProfile, VerificationCode, LoginRecord
+from .models import User, UserAppProfile, LoginRecord
 
 
 @admin.register(User)
@@ -22,15 +22,6 @@ class UserAppProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'app_name', 'is_active', 'created_at')
     list_filter = ('app_name', 'is_active')
     search_fields = ('user__username', 'user__phone')
-
-
-@admin.register(VerificationCode)
-class VerificationCodeAdmin(admin.ModelAdmin):
-    list_display = ('phone', 'code', 'purpose', 'is_used', 'expires_at', 'created_at')
-    list_filter = ('purpose', 'is_used')
-    search_fields = ('phone',)
-
-
 @admin.register(LoginRecord)
 class LoginRecordAdmin(admin.ModelAdmin):
     list_display = ('user', 'login_type', 'app_name', 'ip_address', 'created_at')
