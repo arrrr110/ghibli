@@ -43,7 +43,6 @@ def get_or_create_user_by_phone(phone, app_name, nickname=''):
         phone=phone,
         defaults={
             'username': f'user_{phone[-8:]}',  # 自动生成用户名
-            'nickname': nickname or f'用户{phone[-4:]}',
         }
     )
     
@@ -56,7 +55,6 @@ def get_or_create_user_by_phone(phone, app_name, nickname=''):
     profile, profile_created = UserAppProfile.objects.get_or_create(
         user=user,
         app_name=app_name,
-        defaults={'app_user_id': phone}
     )
     
     return user, user_created, profile, profile_created
@@ -179,9 +177,7 @@ class PhoneLoginView(APIView):
         response_data = {
             'user': {
                 'id': str(user.id),
-                'nickname': user.nickname,
                 'phone': f'{phone[:3]}****{phone[-4:]}',
-                'avatar': user.avatar,
                 'is_new_user': user_created,
             },
             **tokens,
