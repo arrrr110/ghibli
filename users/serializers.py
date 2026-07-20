@@ -3,9 +3,10 @@ from .models import User, UserAppProfile
 
 
 class UserSerializer(serializers.ModelSerializer):
+    """用户基础信息序列化器（只包含认证相关字段）"""
     class Meta:
         model = User
-        fields = ['id', 'username', 'nickname', 'phone', 'avatar', 'date_joined']
+        fields = ['id', 'username', 'phone', 'email', 'date_joined']
         read_only_fields = ['id', 'date_joined']
 
 
@@ -32,6 +33,7 @@ class PhoneCodeLoginSerializer(serializers.Serializer):
 
 
 class UserAppProfileSerializer(serializers.ModelSerializer):
+    """用户应用标记序列化器"""
     class Meta:
         model = UserAppProfile
-        fields = ['id', 'app_name', 'app_user_id', 'extra_data', 'created_at']
+        fields = ['id', 'app_name', 'is_active', 'extra_data', 'created_at']

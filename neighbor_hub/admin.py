@@ -21,9 +21,9 @@ class CommunityAdmin(admin.ModelAdmin):
 
 @admin.register(NeighborHubProfile)
 class NeighborHubProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'community', 'role', 'building', 'is_verified', 'created_at')
+    list_display = ('user', 'nickname', 'avatar', 'community', 'role', 'building', 'is_verified', 'created_at')
     list_filter = ('role', 'is_verified', 'community')
-    search_fields = ('user__username', 'user__phone', 'building')
+    search_fields = ('user__username', 'user__phone', 'nickname', 'building')
 
 
 @admin.register(Topic)
@@ -57,8 +57,8 @@ class TopicSubscriptionAdmin(admin.ModelAdmin):
 
 @admin.register(Invitation)
 class InvitationAdmin(admin.ModelAdmin):
-    list_display = ('inviter', 'invitee_phone', 'code', 'status', 'created_at')
-    list_filter = ('status',)
+    list_display = ('inviter', 'invitee', 'inviter_community', 'status', 'created_at')
+    list_filter = ('status', 'inviter_community')
 
 
 @admin.register(VerificationRequest)

@@ -34,7 +34,13 @@ class Community(models.Model):
 
 
 class NeighborHubProfile(models.Model):
-    """用户在 neighbor_hub 应用中的专属 Profile"""
+    """用户在 neighbor_hub 应用中的专属 Profile
+    
+    职责：存储社区治理相关的用户资料
+    - 昵称、头像（应用专属，各应用可不同）
+    - 角色、认证状态
+    - 小区、楼号
+    """
     
     class Role(models.TextChoices):
         OWNER = 'owner', '业主'
@@ -48,6 +54,13 @@ class NeighborHubProfile(models.Model):
         on_delete=models.CASCADE,
         related_name='neighbor_hub_profile'
     )
+    
+    # 应用专属资料
+    nickname = models.CharField(max_length=50, blank=True, verbose_name="昵称")
+    avatar = models.URLField(blank=True, verbose_name="头像URL")
+    bio = models.CharField(max_length=200, blank=True, verbose_name="个人简介")
+    
+    # 社区关系
     community = models.ForeignKey(
         Community,
         on_delete=models.SET_NULL,
@@ -60,7 +73,6 @@ class NeighborHubProfile(models.Model):
         default=Role.UNVERIFIED, verbose_name="角色"
     )
     building = models.CharField(max_length=50, blank=True, verbose_name="楼号")
-    bio = models.CharField(max_length=200, blank=True, verbose_name="个人简介")
     
     # 认证状态
     is_verified = models.BooleanField(default=False, verbose_name="已认证")
@@ -93,7 +105,7 @@ class NeighborHubProfile(models.Model):
         verbose_name_plural = verbose_name
     
     def __str__(self):
-        return f"{self.user} @ {self.community}"
+        return f"{self.nickname or self.user} @ {self.community}"
     
     def verify(self, committee_user, note=''):
         """业委会认证用户"""
@@ -231,7 +243,7 @@ class TopicSubscription(models.Model):
 
 
 class Invitation(models.Model):
-    """邀请记录"""
+    """邀请记录 - 简化版，支持H5分享链接和二维码"""
     
     class Status(models.TextChoices):
         PENDING = 'pending', '待接受'
@@ -244,13 +256,10 @@ class Invitation(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_invitations'
     )
     inviter_community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name='sent_invitations')
-    invitee_phone = models.CharField(max_length=20)
     invitee = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='received_invitations'
     )
-    invitee_name = models.CharField(max_length=50, blank=True)
-    code = models.CharField(max_length=20, unique=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     expires_at = models.DateTimeField()
     accepted_at = models.DateTimeField(null=True, blank=True)
@@ -263,7 +272,19 @@ class Invitation(models.Model):
         verbose_name_plural = verbose_name
     
     def __str__(self):
-        return f"{self.inviter} -> {self.invitee_phone}"
+        invitee_info = self.invitee.username if self.invitee else '未注册'
+        return f"{self.inviter.username} -> {invitee_info}"
+    
+    def accept(self, user):
+        """接受邀请"""
+        from django.utils import timezone
+        if self.status == self.Status.PENDING and self.expires_at > timezone.now():
+            self.invitee = user
+            self.status = self.Status.ACCEPTED
+            self.accepted_at = timezone.now()
+            self.save()
+            return True
+        return False
 
 
 class VerificationRequest(models.Model):

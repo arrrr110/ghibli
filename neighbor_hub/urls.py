@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     CurrentUserProfileView,
+    SwitchCommunityView,
     CommunityViewSet,
     TopicViewSet,
     InvitationViewSet,
@@ -20,6 +21,8 @@ router.register(r'verification-requests', VerificationRequestViewSet, basename='
 router.register(r'notifications', NotificationViewSet, basename='notification')
 
 urlpatterns = [
+    # 切换小区（必须注册在 users/me/ 之前，否则会被 users/me/ 匹配）
+    path('users/me/switch-community/', SwitchCommunityView.as_view(), name='user-community'),
     # 当前用户 Profile
     path('users/me/', CurrentUserProfileView.as_view(), name='current-user-profile'),
     

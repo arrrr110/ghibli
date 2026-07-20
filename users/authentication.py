@@ -222,28 +222,12 @@ class UserProfileView(APIView):
 
         user = request.user
 
-        # 获取 token 中的 app_name
-        app_name = ''
-        auth = request.auth
-        if auth and isinstance(auth, dict):
-            app_name = auth.get('app_name', '')
-
-        # 获取应用 Profile
-        app_profile = user.get_app_profile(app_name) if app_name else None
-
         data = {
             'id': str(user.id),
             'username': user.username,
-            'nickname': user.nickname,
             'phone': f'{user.phone[:3]}****{user.phone[-4:]}' if user.phone else None,
-            'avatar': user.avatar,
+            'email': user.email,
             'date_joined': user.date_joined,
         }
-
-        if app_profile:
-            data['app_profile'] = {
-                'app_name': app_profile.app_name,
-                'extra_data': app_profile.extra_data,
-            }
 
         return Response(data)

@@ -22,6 +22,7 @@ from .models import (
     VerificationRequest,
     AppNotification,
 )
+from users.models import UserAppProfile, User
 from .permissions import (
     IsVerifiedUser,
     IsCommitteeMember,
@@ -35,9 +36,11 @@ from .serializers import (
     TopicCreateSerializer,
     CommentSerializer,
     InvitationSerializer,
+    InvitationCreateSerializer,
     VerificationRequestSerializer,
     VerificationRequestReviewSerializer,
     AppNotificationSerializer,
+    SwitchCommunitySerializer,
 )
 
 
@@ -74,6 +77,74 @@ class CurrentUserProfileView(APIView):
         return Response(serializer.data)
 
 
+class SwitchCommunityView(APIView):
+    """
+    切换当前用户所属小区
+    POST /api/neighbor-hub/users/me/community/
+    
+    规则：
+    - 切换到新小区后，用户认证状态自动重置为未认证
+    - 用户可自由切换回原小区，需重新认证
+    - 小区切换后，用户仅能访问新小区的数据
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        serializer = SwitchCommunitySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        target_community_id = serializer.validated_data['community']
+        profile = getattr(request.user, 'neighbor_hub_profile', None)
+        
+        if not profile:
+            return Response(
+                {'error': '用户档案不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # 检查是否切换到同一个小区
+        if profile.community and profile.community_id == target_community_id:
+            return Response(
+                {'error': '您已经是该小区的成员'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 获取目标小区
+        target_community = Community.objects.get(id=target_community_id)
+        
+        # 记录旧小区信息（用于响应）
+        old_community_name = profile.community.name if profile.community else None
+        was_verified = profile.is_verified
+        old_role = profile.role
+        
+        # 执行小区切换：重置认证状态
+        profile.community = target_community
+        profile.is_verified = False
+        profile.role = NeighborHubProfile.Role.UNVERIFIED
+        profile.verified_by = None
+        profile.verified_at = None
+        profile.verification_note = ''
+        profile.save()
+        
+        # 返回更新后的 Profile
+        response_serializer = NeighborHubProfileSerializer(
+            profile, context={'request': request}
+        )
+        
+        return Response({
+            'message': '小区切换成功',
+            'data': response_serializer.data,
+            'meta': {
+                'old_community_name': old_community_name,
+                'old_community_id': str(profile.community_id) if profile.community else None,
+                'was_verified': was_verified,
+                'old_role': old_role,
+                'new_community_name': target_community.name,
+                'requires_reverification': True,
+            }
+        })
+
+
 class CommunityViewSet(ModelViewSet):
     """
     小区 CRUD
@@ -90,8 +161,9 @@ class CommunityViewSet(ModelViewSet):
     lookup_field = 'pk'
     
     def get_permissions(self):
-        if self.action in ('list', 'retrieve'):
+        if self.action in ('list', 'retrieve', 'create'):
             return [IsAuthenticated()]
+        # 更新/删除小区需要业委会权限
         return [IsAuthenticated(), IsCommitteeMember()]
     
     def perform_create(self, serializer):
@@ -99,13 +171,112 @@ class CommunityViewSet(ModelViewSet):
     
     @action(detail=True, methods=['get'])
     def members(self, request, pk=None):
-        """获取小区成员列表"""
+        """
+        获取小区成员列表（业委会专用，支持筛选）
+        
+        查询参数:
+        - is_verified: true/false  按认证状态筛选
+        - role: owner/committee/property/unverified  按角色筛选
+        """
+        # 仅业委会可访问
+        profile = getattr(request.user, 'neighbor_hub_profile', None)
+        if not profile or profile.role != 'committee':
+            return Response(
+                {'error': '仅业委会成员可查看成员列表'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         community = self.get_object()
-        profiles = NeighborHubProfile.objects.filter(
+        queryset = NeighborHubProfile.objects.filter(
             community=community, is_active=True
         ).select_related('user')
-        serializer = NeighborHubProfileSerializer(profiles, many=True, context={'request': request})
+        
+        # 按认证状态筛选
+        is_verified = request.query_params.get('is_verified')
+        if is_verified is not None:
+            if is_verified.lower() in ('true', '1'):
+                queryset = queryset.filter(is_verified=True)
+            elif is_verified.lower() in ('false', '0'):
+                queryset = queryset.filter(is_verified=False)
+        
+        # 按角色筛选
+        role = request.query_params.get('role')
+        if role:
+            queryset = queryset.filter(role=role)
+        
+        serializer = NeighborHubProfileSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
+    
+    @action(detail=True, methods=['delete'], url_path=r'members/(?P<user_id>[^/.]+)')
+    def remove_member(self, request, pk=None, user_id=None):
+        """
+        业委会删除小区成员（方案A：最小删除）
+        
+        删除内容：
+        1. UserAppProfile - 移除应用访问权
+        2. NeighborHubProfile - 软删除（is_active=False，昵称改为已注销）
+        
+        保留内容：
+        - User 基础账户
+        - Topic/Comment 等历史数据
+        - Invitation 邀请记录
+        """
+        # 仅业委会可操作
+        profile = getattr(request.user, 'neighbor_hub_profile', None)
+        if not profile or profile.role != 'committee':
+            return Response(
+                {'error': '仅业委会成员可删除成员'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        community = self.get_object()
+        
+        # 不能删除自己
+        if str(user_id) == str(request.user.id):
+            return Response(
+                {'error': '不能删除自己'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 查找目标用户
+        try:
+            target_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': '用户不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # 检查目标用户是否是本小区成员
+        target_profile = getattr(target_user, 'neighbor_hub_profile', None)
+        if not target_profile or not target_profile.is_active:
+            return Response(
+                {'error': '该用户不是小区活跃成员'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if target_profile.community_id != community.id:
+            return Response(
+                {'error': '该用户不属于本小区'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 不能删除其他业委会成员
+        if target_profile.role == 'committee':
+            return Response(
+                {'error': '不能删除其他业委会成员'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # 1. 删除 UserAppProfile（移除应用访问权）
+        UserAppProfile.objects.filter(user=target_user, app_name='neighbor_hub').delete()
+        
+        # 2. 软删除 NeighborHubProfile
+        target_profile.is_active = False
+        target_profile.nickname = '已注销用户'
+        target_profile.save()
+        
+        return Response({'message': '成员已从小区移除'}, status=status.HTTP_200_OK)
 
 
 class TopicViewSet(ModelViewSet):
@@ -255,53 +426,71 @@ class TopicViewSet(ModelViewSet):
 
 class InvitationViewSet(ModelViewSet):
     """
-    邀请管理
-    GET    /api/neighbor-hub/invitations/       我的邀请记录
-    POST   /api/neighbor-hub/invitations/       创建邀请
-    POST   /api/neighbor-hub/invitations/verify/ 验证邀请码
+    邀请管理 - 简化版支持H5分享链接和二维码
+    
+    GET    /api/neighbor-hub/invitations/             我的邀请记录（作为邀请人）
+    POST   /api/neighbor-hub/invitations/             创建邀请记录（前端传入 inviter user_id）
+    DELETE /api/neighbor-hub/invitations/{id}/        删除邀请记录
+    
+    流程:
+    1. 前端生成链接: https://域名.com/join?inviter={user_id}
+    2. 被邀请用户点击链接注册/登录
+    3. 前端检测到 URL 参数 inviter
+    4. 前端调用 POST /invitations/ {"inviter": "xxx"} 记录邀请关系
     """
-    serializer_class = InvitationSerializer
     permission_classes = [IsAuthenticated]
     
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return InvitationCreateSerializer
+        return InvitationSerializer
+    
     def get_queryset(self):
+        """获取当前用户相关的邀请记录（作为邀请人或被邀请人）"""
         return Invitation.objects.filter(
-            inviter=self.request.user
-        ).select_related('inviter_community')
+            Q(inviter=self.request.user) | Q(invitee=self.request.user)
+        ).select_related('inviter_community', 'invitee', 'inviter')
     
-    def perform_create(self, serializer):
-        import random
-        import string
-        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-        expires_at = timezone.now() + timedelta(days=7)
-        # 获取用户的社区
-        profile = getattr(self.request.user, 'neighbor_hub_profile', None)
-        community = profile.community if profile else None
-        serializer.save(
-            inviter=self.request.user,
-            inviter_community=community,
-            code=code,
-            expires_at=expires_at
-        )
-    
-    @action(detail=False, methods=['post'])
-    def verify(self, request):
-        """验证邀请码"""
-        code = request.data.get('code', '').strip().upper()
-        if not code:
-            raise ValidationError({'code': '请输入邀请码'})
-        try:
-            invitation = Invitation.objects.get(
-                code=code,
-                status=Invitation.Status.PENDING,
-                expires_at__gt=timezone.now()
+    def create(self, request, *args, **kwargs):
+        """创建邀请记录 - 前端传入 inviter（邀请人 user_id）"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        inviter_id = serializer.validated_data['inviter']
+        
+        # 不能邀请自己
+        if str(inviter_id) == str(request.user.id):
+            return Response(
+                {'error': '不能邀请自己'},
+                status=status.HTTP_400_BAD_REQUEST
             )
-            return Response({
-                'valid': True,
-                'community_name': invitation.inviter_community.name,
-                'inviter_name': invitation.inviter.nickname or invitation.inviter.username
-            })
-        except Invitation.DoesNotExist:
-            return Response({'valid': False, 'message': '邀请码无效或已过期'})
+        
+        # 获取邀请人信息
+        from users.models import User
+        try:
+            inviter = User.objects.select_related('neighbor_hub_profile').get(id=inviter_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': '邀请人不存在'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 获取邀请人的小区
+        inviter_profile = getattr(inviter, 'neighbor_hub_profile', None)
+        community = inviter_profile.community if inviter_profile else None
+        
+        # 创建邀请记录 - 直接设为已接受状态
+        invitation = Invitation.objects.create(
+            inviter=inviter,
+            invitee=request.user,
+            inviter_community=community,
+            status=Invitation.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            expires_at=timezone.now() + timedelta(days=30)
+        )
+        
+        response_serializer = InvitationSerializer(invitation, context={'request': request})
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class VerificationRequestViewSet(ModelViewSet):

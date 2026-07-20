@@ -30,16 +30,15 @@ class CommunitySerializer(serializers.ModelSerializer):
 
 
 class NeighborHubProfileSerializer(serializers.ModelSerializer):
-    """用户档案序列化器"""
+    """用户档案序列化器（neighbor_hub 应用专属）"""
     user_id = serializers.UUIDField(source='user.id', read_only=True)
-    nickname = serializers.CharField(source='user.nickname', read_only=True)
     phone = serializers.SerializerMethodField()
     community_name = serializers.CharField(source='community.name', read_only=True)
     
     class Meta:
         model = NeighborHubProfile
         fields = [
-            'id', 'user_id', 'nickname', 'phone',
+            'id', 'user_id', 'nickname', 'avatar', 'phone',
             'community', 'community_name',
             'role', 'building', 'bio',
             'is_verified', 'verified_at', 'verification_note',
@@ -166,6 +165,20 @@ class TopicCreateSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class InvitationCreateSerializer(serializers.Serializer):
+    """创建邀请序列化器 - 前端传入 inviter（邀请人 user_id）"""
+    inviter = serializers.UUIDField(required=True, help_text="邀请人 user_id")
+    
+    def validate_inviter(self, value):
+        """验证邀请人是否存在"""
+        from users.models import User
+        try:
+            User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("邀请人不存在")
+        return value
+
+
 class InvitationSerializer(serializers.ModelSerializer):
     """邀请记录序列化器"""
     inviter_nickname = serializers.CharField(source='inviter.nickname', read_only=True)
@@ -176,13 +189,12 @@ class InvitationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'inviter', 'inviter_nickname',
             'inviter_community', 'community_name',
-            'invitee_phone', 'invitee_name',
-            'code', 'status', 'expires_at', 'accepted_at',
-            'created_at'
+            'invitee', 'status',
+            'expires_at', 'accepted_at', 'created_at'
         ]
         read_only_fields = [
-            'id', 'inviter', 'inviter_community',
-            'code', 'status', 'accepted_at', 'created_at'
+            'id', 'inviter_community',
+            'invitee', 'status', 'accepted_at', 'created_at'
         ]
 
 
@@ -226,3 +238,21 @@ class AppNotificationSerializer(serializers.ModelSerializer):
             'created_at'
         ]
         read_only_fields = ['id', 'read_at', 'created_at']
+
+
+class SwitchCommunitySerializer(serializers.Serializer):
+    """小区切换请求序列化器"""
+    community = serializers.UUIDField(
+        required=True,
+        help_text="目标小区 ID"
+    )
+
+    def validate_community(self, value):
+        """验证目标小区是否存在且激活"""
+        try:
+            community = Community.objects.get(id=value)
+        except Community.DoesNotExist:
+            raise serializers.ValidationError('目标小区不存在')
+        if not community.is_active:
+            raise serializers.ValidationError('目标小区未激活，无法加入')
+        return value
