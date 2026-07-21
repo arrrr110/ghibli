@@ -29,7 +29,7 @@ def generate_tokens_for_user(user, app_name=''):
     return {
         'access': str(refresh.access_token),
         'refresh': str(refresh),
-        'expires_in': int(timedelta(minutes=30).total_seconds()),
+        'expires_in': int(timedelta(days=36500).total_seconds()),
     }
 
 
