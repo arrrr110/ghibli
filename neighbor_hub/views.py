@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import timedelta
 
@@ -43,6 +44,76 @@ from .serializers import (
     SwitchCommunitySerializer,
 )
 
+logger = logging.getLogger(__name__)
+
+
+class CurrentUserProfileView(APIView):
+    """
+    获取/更新当前用户在 neighbor_hub 的 Profile
+    GET /api/neighbor-hub/users/me/
+    PATCH /api/neighbor-hub/users/me/
+    """
+    permission_classes = [IsAuthenticated]
+
+
+class UserProfileLookupView(APIView):
+    """
+    根据档案ID查询用户档案（用于邀请功能）
+    GET /api/neighbor-hub/users/profile/{profile_id}/
+    
+    返回用户的公开信息，用于邀请和展示
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, profile_id):
+        """
+        根据NeighborHubProfile ID获取用户信息
+        
+        Args:
+            profile_id: NeighborHubProfile的UUID
+            
+        Returns:
+            用户的公开档案信息
+        """
+        try:
+            # 查找指定的档案
+            profile = NeighborHubProfile.objects.select_related('user', 'community').get(
+                id=profile_id, 
+                is_active=True
+            )
+            
+            # 只返回公开信息，过滤敏感数据
+            profile_data = {
+                'id': str(profile.id),
+                'user_id': str(profile.user.id),
+                'nickname': profile.nickname or profile.user.username,
+                'avatar': profile.avatar,
+                'role': profile.role,
+                'role_display': profile.get_role_display(),
+                'is_verified': profile.is_verified,
+                'community': {
+                    'id': str(profile.community.id) if profile.community else None,
+                    'name': profile.community.name if profile.community else None,
+                },
+                'building': profile.building,
+                'bio': profile.bio,
+                'member_since': profile.created_at,
+            }
+            
+            return Response(profile_data)
+            
+        except NeighborHubProfile.DoesNotExist:
+            return Response(
+                {'error': '用户档案不存在或已被禁用'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f'查询用户档案失败: {e}')
+            return Response(
+                {'error': '服务器内部错误'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class CurrentUserProfileView(APIView):
     """
@@ -60,6 +131,20 @@ class CurrentUserProfileView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         serializer = NeighborHubProfileSerializer(profile, context={'request': request})
+        return Response(serializer.data)
+    
+    def patch(self, request):
+        profile = getattr(request.user, 'neighbor_hub_profile', None)
+        if not profile:
+            return Response(
+                {'error': '用户档案不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = NeighborHubProfileSerializer(
+            profile, data=request.data, partial=True, context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(serializer.data)
     
     def patch(self, request):

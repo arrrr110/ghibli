@@ -52,6 +52,7 @@ Authorization: Bearer <access_token>
 | 用户档案 | GET | `/users/me/` | 已登录 | 获取当前用户 Profile |
 | 用户档案 | PATCH | `/users/me/` | 已登录 | 更新当前用户 Profile（仅 building/bio） |
 | 用户档案 | POST | `/users/me/switch-community/` | 已登录 | 切换小区（重置认证状态） |
+| 用户档案 | GET | `/users/profile/{profile_id}/` | 已登录 | 查询指定用户档案（用于邀请） |
 | 小区 | GET | `/communities/` | 已登录 | 小区列表 |
 | 小区 | POST | `/communities/` | 已登录 + 业委会 | 创建小区 |
 | 小区 | GET | `/communities/{id}/` | 已登录 | 小区详情 |
@@ -277,6 +278,86 @@ Authorization: Bearer <access_token>
 | 认证权限 | 只有被任命为业委会的小区才能审核该小区的认证申请 |
 
 > **工作流**：用户创建小区 → 通过邀请或自由加入发展成员 → 管理员在后台任命业委会 → 业委会开始审核成员身份
+
+### 4. 查询用户档案（用于邀请功能）
+
+**GET** `/users/profile/{profile_id}/`
+
+**权限**: `IsAuthenticated`
+
+**功能说明**:
+- 根据NeighborHubProfile ID查询用户档案信息
+- 主要用于邀请功能，显示邀请人的用户信息
+- 仅返回公开信息，过滤敏感数据
+- 不返回被禁用用户的档案（is_active=False）
+
+**URL参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `profile_id` | UUID | ✅ | NeighborHubProfile 的 ID |
+
+**响应 (HTTP 200)**:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "nickname": "张三",
+  "avatar": "https://example.com/avatar.jpg",
+  "role": "owner",
+  "role_display": "业主",
+  "is_verified": true,
+  "community": {
+    "id": "550e8400-e29b-41d4-a716-446655440002",
+    "name": "阳光花园"
+  },
+  "building": "1号楼",
+  "bio": "热爱社区生活",
+  "member_since": "2024-01-15T10:30:00Z"
+}
+```
+
+**响应字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | UUID | NeighborHubProfile ID |
+| `user_id` | UUID | 关联的用户 ID |
+| `nickname` | string | 用户昵称（优先使用档案昵称，否则使用用户名） |
+| `avatar` | string/null | 头像URL |
+| `role` | string | 用户角色（owner/committee/property） |
+| `role_display` | string | 角色显示名称（业主/业委会/物业） |
+| `is_verified` | boolean | 是否已认证 |
+| `community` | object/null | 所属小区信息 |
+| `community.id` | UUID/null | 小区ID |
+| `community.name` | string/null | 小区名称 |
+| `building` | string | 楼号 |
+| `bio` | string | 个人简介 |
+| `member_since` | datetime | 加入时间（档案创建时间） |
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 404 | 用户档案不存在或已被禁用 | `{"error": "用户档案不存在或已被禁用"}` |
+| 401 | 未认证 | `{"error": "Authentication credentials were not provided."}` |
+| 500 | 服务器内部错误 | `{"error": "服务器内部错误"}` |
+
+**使用场景**:
+
+1. **邀请新用户**: 前端通过URL参数获取邀请人profile_id，调用此接口显示邀请人信息
+2. **用户信息展示**: 显示其他用户的基本信息（不敏感信息）
+3. **社区成员查询**: 查询小区内其他用户的公开档案
+
+**示例**: 邀请流程
+```
+URL: https://app.example.com/register?inviter_profile=550e8400-e29b-41d4-a716-446655440001
+
+前端获取邀请人信息:
+GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
+
+显示: "张三（阳光花园 业主）邀请您加入邻里圈"
+```
 
 ---
 

@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     CurrentUserProfileView,
+    UserProfileLookupView,
     SwitchCommunityView,
     CommunityViewSet,
     TopicViewSet,
@@ -25,6 +26,8 @@ urlpatterns = [
     path('users/me/switch-community/', SwitchCommunityView.as_view(), name='user-community'),
     # 当前用户 Profile
     path('users/me/', CurrentUserProfileView.as_view(), name='current-user-profile'),
+    # 用户档案查询（用于邀请功能）
+    path('users/profile/<uuid:profile_id>/', UserProfileLookupView.as_view(), name='user-profile-lookup'),
     
     # ViewSet 路由
     path('', include(router.urls)),
