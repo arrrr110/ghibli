@@ -12,6 +12,8 @@
 
 各应用的业务资料（昵称、头像、小区、角色等）由各自的 Profile 模型管理。
 
+**💡 新增特性**：当使用 `app_name=neighbor_hub` 登录时，系统会自动创建基础 `NeighborHubProfile` 档案，用户无需额外调用接口创建。
+
 ---
 
 ## 通用说明
@@ -108,6 +110,7 @@
 - 如果手机号已存在，直接登录
 - 返回用户基础信息（不含昵称/头像，由各应用 Profile 提供）
 - 同时创建对应应用的 `UserAppProfile` 记录
+- **新增特性**：当 `app_name=neighbor_hub` 时，自动创建基础 `NeighborHubProfile` 档案
 
 #### 请求参数
 
@@ -140,9 +143,18 @@
     },
     "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-    "expires_in": 1800
+    "expires_in": 1800,
+    "neighbor_hub_profile": {
+        "id": "550e8400-e29b-41d4-a716-446655440001",
+        "nickname": "138****8000",
+        "is_new_profile": true,
+        "is_profile_complete": false,
+        "needs_completion": true
+    }
 }
 ```
+
+*注：`neighbor_hub_profile` 字段仅在 `app_name=neighbor_hub` 时返回*
 
 **老用户登录成功 `200 OK`**：
 
@@ -155,9 +167,18 @@
     },
     "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-    "expires_in": 1800
+    "expires_in": 1800,
+    "neighbor_hub_profile": {
+        "id": "550e8400-e29b-41d4-a716-446655440001",
+        "nickname": "张三",
+        "is_new_profile": false,
+        "is_profile_complete": true,
+        "needs_completion": false
+    }
 }
 ```
+
+*注：`neighbor_hub_profile` 字段仅在 `app_name=neighbor_hub` 时返回*
 
 > **注意**：`nickname` 和 `avatar` 不在本接口返回，请调用对应应用的 Profile 接口获取。
 
@@ -310,6 +331,18 @@ Authorization: Bearer <access_token>
 | `app_name` | string | 登录应用 |
 | `created_at` | datetime | 登录时间 |
 
+### 新增响应字段说明
+
+#### neighbor_hub_profile 字段（仅当 app_name=neighbor_hub 时返回）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | UUID | NeighborHubProfile主键 |
+| `nickname` | string | 用户在邻里圈应用中的昵称 |
+| `is_new_profile` | boolean | 是否是新创建的档案 |
+| `is_profile_complete` | boolean | 档案是否完整（是否有小区信息） |
+| `needs_completion` | boolean | 是否需要进行档案完善 |
+
 ---
 
 ## 调用流程
@@ -359,4 +392,4 @@ Authorization: Bearer <access_token>
 
 ---
 
-*文档生成时间：2024-07-20*
+*文档更新时间：2024-07-21*

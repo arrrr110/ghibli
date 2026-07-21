@@ -1,6 +1,6 @@
 import logging
 from datetime import timedelta
-
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -36,28 +36,48 @@ def generate_tokens_for_user(user, app_name=''):
 def get_or_create_user_by_phone(phone, app_name, nickname=''):
     """
     通过手机号获取或创建用户
-    同时创建对应应用的 Profile
+    同时创建对应应用的 Profile 和 NeighborHubProfile（如果是neighbor_hub应用）
     """
-    # 查找或创建用户
-    user, user_created = User.objects.get_or_create(
-        phone=phone,
-        defaults={
-            'username': f'user_{phone[-8:]}',  # 自动生成用户名
-        }
-    )
-    
-    # 确保用户名为 phone 的用户名格式（如果是新创建的）
-    if not user.username.startswith('user_'):
-        user.username = f'user_{phone[-8:]}'
-        user.save(update_fields=['username'])
-    
-    # 查找或创建 app profile
-    profile, profile_created = UserAppProfile.objects.get_or_create(
-        user=user,
-        app_name=app_name,
-    )
-    
-    return user, user_created, profile, profile_created
+    with transaction.atomic():
+        # 查找或创建用户
+        user, user_created = User.objects.get_or_create(
+            phone=phone,
+            defaults={
+                'username': f'user_{phone[-8:]}',  # 自动生成用户名
+            }
+        )
+        
+        # 确保用户名为 phone 的用户名格式（如果是新创建的）
+        if not user.username.startswith('user_'):
+            user.username = f'user_{phone[-8:]}'
+            user.save(update_fields=['username'])
+        
+        # 查找或创建 app profile
+        profile, profile_created = UserAppProfile.objects.get_or_create(
+            user=user,
+            app_name=app_name,
+        )
+
+        # 如果是neighbor_hub应用，自动创建基础NeighborHubProfile
+        neighbor_profile = None
+        neighbor_profile_created = False
+        if app_name == 'neighbor_hub':
+            try:
+                from neighbor_hub.models import NeighborHubProfile
+                neighbor_profile, neighbor_profile_created = NeighborHubProfile.objects.get_or_create(
+                    user=user,
+                    defaults={
+                        'nickname': nickname or f'{phone[:3]}****{phone[-4:]}',
+                        'role': NeighborHubProfile.Role.UNVERIFIED,
+                    }
+                )
+            except ImportError:
+                # 如果neighbor_hub应用不可用，跳过创建
+                logger.warning('neighbor_hub应用不可用，跳过创建NeighborHubProfile')
+            except Exception as e:
+                logger.error(f'创建NeighborHubProfile失败: {e}')
+        
+        return user, user_created, profile, profile_created, neighbor_profile, neighbor_profile_created
 
 
 def verify_sms_code(phone, code, purpose='login'):
@@ -150,7 +170,7 @@ class PhoneLoginView(APIView):
             return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
 
         # 获取或创建用户（get_or_create）
-        user, user_created, profile, profile_created = get_or_create_user_by_phone(phone, app_name)
+        user, user_created, profile, profile_created, neighbor_profile, neighbor_profile_created = get_or_create_user_by_phone(phone, app_name)
 
         # 记录登录
         LoginRecord.objects.create(
@@ -172,6 +192,16 @@ class PhoneLoginView(APIView):
             },
             **tokens,
         }
+
+        # 添加neighbor_hub档案信息（如果是neighbor_hub应用）
+        if app_name == 'neighbor_hub' and neighbor_profile:
+            response_data['neighbor_hub_profile'] = {
+                'id': str(neighbor_profile.id),
+                'nickname': neighbor_profile.nickname,
+                'is_new_profile': neighbor_profile_created,
+                'is_profile_complete': bool(neighbor_profile.community),  # 有小区信息表示档案完整
+                'needs_completion': not bool(neighbor_profile.community),  # 需要完善档案
+            }
 
         # 新用户返回 201，老用户返回 200
         return Response(response_data, status=status.HTTP_201_CREATED if user_created else status.HTTP_200_OK)
