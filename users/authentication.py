@@ -68,7 +68,7 @@ def get_or_create_user_by_phone(phone, app_name, nickname=''):
                     user=user,
                     defaults={
                         'nickname': nickname or f'{phone[:3]}****{phone[-4:]}',
-                        'role': NeighborHubProfile.Role.UNVERIFIED,
+                        'role': NeighborHubProfile.Role.OWNER,
                     }
                 )
             except ImportError:

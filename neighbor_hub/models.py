@@ -46,7 +46,6 @@ class NeighborHubProfile(models.Model):
         OWNER = 'owner', '业主'
         COMMITTEE = 'committee', '业委会'
         PROPERTY = 'property', '物业'
-        UNVERIFIED = 'unverified', '待认证'
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
@@ -70,7 +69,7 @@ class NeighborHubProfile(models.Model):
     )
     role = models.CharField(
         max_length=20, choices=Role.choices,
-        default=Role.UNVERIFIED, verbose_name="角色"
+        default=Role.OWNER, verbose_name="角色"
     )
     building = models.CharField(max_length=50, blank=True, verbose_name="楼号")
     
