@@ -59,18 +59,18 @@ class CurrentUserProfileView(APIView):
 class UserProfileLookupView(APIView):
     """
     根据档案ID查询用户档案（用于邀请功能）
-    GET /api/neighbor-hub/users/profile/{profile_id}/
+    GET /api/neighbor-hub/users/profile/{user_id}/
     
     返回用户的公开信息，用于邀请和展示
     """
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, profile_id):
+    def get(self, request, user_id):
         """
         根据NeighborHubProfile ID获取用户信息
         
         Args:
-            profile_id: NeighborHubProfile的UUID
+            user_id: NeighborHubProfile的关联用户UUID
             
         Returns:
             用户的公开档案信息
@@ -78,7 +78,7 @@ class UserProfileLookupView(APIView):
         try:
             # 查找指定的档案
             profile = NeighborHubProfile.objects.select_related('user', 'community').get(
-                id=profile_id, 
+                user_id=user_id, 
                 is_active=True
             )
             

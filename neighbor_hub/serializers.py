@@ -60,11 +60,34 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
         return None
     
     def update(self, instance, validated_data):
-        """只允许更新 building, bio 等其他字段不可变"""
-        allowed_fields = ['building', 'bio']
+        """
+        允许更新业务字段，禁止修改系统管理字段（认证、角色、UUID等）
+        可按需修改 allowed_fields 来开放/限制字段
+        """
+        # 用户可以修改的业务字段
+        allowed_fields = [
+            'nickname',     # 昵称
+            'avatar',       # 头像URL  
+            'building',     # 楼号
+            'bio',          # 个人简介
+        ]
+        
+        # 禁止修改的系统字段（这些字段有特殊业务流程）
+        protected_fields = [
+            'role',         # 角色：需通过认证申请/管理后台设置
+            'is_verified',  # 认证状态：需通过认证流程
+            'verified_by',  # 认证人：系统自动设置
+            'verified_at',  # 认证时间：系统自动设置
+            'verification_note',  # 认证备注：认证流程设置
+            'community',    # 小区：需通过专门的小区切换接口
+            'invited_by',   # 邀请人：通过邀请流程自动设置
+        ]
+        
+        # 应用字段更新
         for field in allowed_fields:
             if field in validated_data:
                 setattr(instance, field, validated_data[field])
+        
         instance.save()
         return instance
 

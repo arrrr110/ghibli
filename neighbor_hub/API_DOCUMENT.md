@@ -52,7 +52,7 @@ Authorization: Bearer <access_token>
 | 用户档案 | GET | `/users/me/` | 已登录 | 获取当前用户 Profile |
 | 用户档案 | PATCH | `/users/me/` | 已登录 | 更新当前用户 Profile（仅 building/bio） |
 | 用户档案 | POST | `/users/me/switch-community/` | 已登录 | 切换小区（重置认证状态） |
-| 用户档案 | GET | `/users/profile/{profile_id}/` | 已登录 | 查询指定用户档案（用于邀请） |
+| 用户档案 | GET | `/users/profile/{user_id}/` | 已登录 | 查询指定用户档案（用于邀请） |
 | 小区 | GET | `/communities/` | 已登录 | 小区列表 |
 | 小区 | POST | `/communities/` | 已登录 + 业委会 | 创建小区 |
 | 小区 | GET | `/communities/{id}/` | 已登录 | 小区详情 |
@@ -167,7 +167,12 @@ Authorization: Bearer <access_token>
 | building | string | 否 | 楼号（最大50字符） |
 | bio | string | 否 | 个人简介（最大200字符） |
 
-> ⚠️ 仅允许修改 `nickname`、`avatar`、`building` 和 `bio` 四个字段，其他字段需通过专门流程（如认证申请）修改。
+**🔒 系统保护字段**（不可通过此接口修改）：
+- `role` - 角色管理需通过认证申请或管理后台
+- `is_verified` - 认证状态需通过专门的认证流程
+- `community` - 小区切换需使用专用接口 `/users/me/switch-community/`
+- `invited_by` - 邀请关系通过邀请流程自动设置
+- `verified_by`, `verified_at`, `verification_note` - 认证相关信息由系统管理
 
 **响应 (HTTP 200)**: 更新后的 Profile 对象
 
@@ -281,12 +286,12 @@ Authorization: Bearer <access_token>
 
 ### 4. 查询用户档案（用于邀请功能）
 
-**GET** `/users/profile/{profile_id}/`
+**GET** `/users/profile/{user_id}/`
 
 **权限**: `IsAuthenticated`
 
 **功能说明**:
-- 根据NeighborHubProfile ID查询用户档案信息
+- 根据NeighborHubProfile 关联用户ID查询用户档案信息
 - 主要用于邀请功能，显示邀请人的用户信息
 - 仅返回公开信息，过滤敏感数据
 - 不返回被禁用用户的档案（is_active=False）
@@ -295,7 +300,7 @@ Authorization: Bearer <access_token>
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `profile_id` | UUID | ✅ | NeighborHubProfile 的 ID |
+| `user_id` | UUID | ✅ | NeighborHubProfile 的 关联用户ID |
 
 **响应 (HTTP 200)**:
 ```json
@@ -356,7 +361,7 @@ URL: https://app.example.com/register?inviter_profile=550e8400-e29b-41d4-a716-44
 前端获取邀请人信息:
 GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
 
-显示: "张三（阳光花园 业主）邀请您加入邻里圈"
+显示: "张三（阳光花园 业主）邀请您加入业主黑板报"
 ```
 
 ---

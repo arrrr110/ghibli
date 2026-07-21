@@ -30,6 +30,7 @@ class PhoneCodeLoginSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=11, help_text='11位手机号')
     code = serializers.CharField(max_length=4, help_text='4位短信验证码')
     app_name = serializers.CharField(default='neighbor_hub', help_text='应用标识（默认 neighbor_hub）')
+    invited_by = serializers.UUIDField(required=False, allow_null=True, help_text='邀请人用户ID（可选）')
 
 
 class UserAppProfileSerializer(serializers.ModelSerializer):

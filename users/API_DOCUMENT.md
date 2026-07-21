@@ -122,6 +122,7 @@
 | `phone` | string | 是 | 11 位手机号 |
 | `code` | string | 是 | 4 位短信验证码 |
 | `app_name` | string | 否 | 应用标识，默认 `neighbor_hub` |
+| `invited_by` | UUID | 否 | 邀请人用户ID（可选） |
 
 #### 请求示例
 
@@ -131,6 +132,23 @@
     "code": "1234",
     "app_name": "neighbor_hub"
 }
+```
+
+#### 邀请注册示例
+
+**通过请求体传递邀请人**：
+```json
+{
+    "phone": "1*********0",
+    "code": "1234",
+    "app_name": "neighbor_hub",
+    "invited_by": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**通过URL参数传递邀请人**：
+```
+POST /api/users/auth/phone-login/?invited_by=550e8400-e29b-41d4-a716-446655440000
 ```
 
 #### 成功响应
@@ -341,7 +359,7 @@ Authorization: Bearer <access_token>
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | UUID | NeighborHubProfile主键 |
-| `nickname` | string | 用户在邻里圈应用中的昵称 |
+| `nickname` | string | 用户在业主黑板报应用中的昵称 |
 | `is_new_profile` | boolean | 是否是新创建的档案 |
 | `is_profile_complete` | boolean | 档案是否完整（是否有小区信息） |
 | `needs_completion` | boolean | 是否需要进行档案完善 |

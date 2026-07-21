@@ -27,7 +27,7 @@ urlpatterns = [
     # 当前用户 Profile
     path('users/me/', CurrentUserProfileView.as_view(), name='current-user-profile'),
     # 用户档案查询（用于邀请功能）
-    path('users/profile/<uuid:profile_id>/', UserProfileLookupView.as_view(), name='user-profile-lookup'),
+    path('users/profile/<uuid:user_id>/', UserProfileLookupView.as_view(), name='user-profile-lookup'),
     
     # ViewSet 路由
     path('', include(router.urls)),

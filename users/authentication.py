@@ -33,10 +33,16 @@ def generate_tokens_for_user(user, app_name=''):
     }
 
 
-def get_or_create_user_by_phone(phone, app_name, nickname=''):
+def get_or_create_user_by_phone(phone, app_name, nickname='', invited_by=None):
     """
     通过手机号获取或创建用户
     同时创建对应应用的 Profile 和 NeighborHubProfile（如果是neighbor_hub应用）
+    
+    Args:
+        phone: 手机号
+        app_name: 应用名称
+        nickname: 昵称
+        invited_by: 邀请人用户ID（可选）
     """
     with transaction.atomic():
         # 查找或创建用户
@@ -64,13 +70,28 @@ def get_or_create_user_by_phone(phone, app_name, nickname=''):
         if app_name == 'neighbor_hub':
             try:
                 from neighbor_hub.models import NeighborHubProfile
+                
+                # 准备创建参数
+                defaults = {
+                    'nickname': nickname or f'{phone[:3]}****{phone[-4:]}',
+                    'role': NeighborHubProfile.Role.OWNER,
+                }
+                
                 neighbor_profile, neighbor_profile_created = NeighborHubProfile.objects.get_or_create(
                     user=user,
-                    defaults={
-                        'nickname': nickname or f'{phone[:3]}****{phone[-4:]}',
-                        'role': NeighborHubProfile.Role.OWNER,
-                    }
+                    defaults=defaults
                 )
+                
+                # 如果是新用户且有邀请人，设置邀请关系
+                if (user_created or neighbor_profile_created) and invited_by:
+                    try:
+                        inviter_user = User.objects.get(id=invited_by)
+                        neighbor_profile.invited_by = inviter_user
+                        neighbor_profile.save(update_fields=['invited_by'])
+                        logger.info(f'为用户 {user.id} 设置邀请人 {invited_by}')
+                    except User.DoesNotExist:
+                        logger.warning(f'邀请人不存在: {invited_by}')
+                        
             except ImportError:
                 # 如果neighbor_hub应用不可用，跳过创建
                 logger.warning('neighbor_hub应用不可用，跳过创建NeighborHubProfile')
@@ -163,14 +184,21 @@ class PhoneLoginView(APIView):
         phone = serializer.validated_data['phone']
         code = serializer.validated_data['code']
         app_name = serializer.validated_data.get('app_name', '')
+        invited_by = serializer.validated_data.get('invited_by')
 
         # 验证验证码
         success, msg = verify_sms_code(phone, code, purpose='login')
         if not success:
             return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 获取或创建用户（get_or_create）
-        user, user_created, profile, profile_created, neighbor_profile, neighbor_profile_created = get_or_create_user_by_phone(phone, app_name)
+        # 获取或创建用户（get_or_create），传递邀请人信息
+        # 优先使用请求体中的invited_by，如果没有则从URL参数中获取
+        url_invited_by = request.GET.get('invited_by') if hasattr(request, 'GET') else None
+        final_invited_by = invited_by or url_invited_by
+        
+        user, user_created, profile, profile_created, neighbor_profile, neighbor_profile_created = get_or_create_user_by_phone(
+            phone, app_name, invited_by=final_invited_by
+        )
 
         # 记录登录
         LoginRecord.objects.create(
