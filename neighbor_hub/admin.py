@@ -6,6 +6,7 @@ from .models import (
     Comment,
     TopicLike,
     TopicSubscription,
+    TopicReadRecord,
     Invitation,
     VerificationRequest,
     AppNotification,
@@ -53,7 +54,14 @@ class TopicLikeAdmin(admin.ModelAdmin):
 
 @admin.register(TopicSubscription)
 class TopicSubscriptionAdmin(admin.ModelAdmin):
-    list_display = ('topic', 'user', 'has_update', 'created_at')
+    list_display = ('topic', 'user', 'is_pinned', 'has_update', 'created_at')
+    list_filter = ('is_pinned', 'has_update')
+
+
+@admin.register(TopicReadRecord)
+class TopicReadRecordAdmin(admin.ModelAdmin):
+    list_display = ('topic', 'user', 'read_count', 'last_read_at')
+    search_fields = ('topic__title', 'user__username')
 
 
 @admin.register(Invitation)

@@ -49,14 +49,11 @@ def get_or_create_user_by_phone(phone, app_name, nickname='', invited_by=None):
         user, user_created = User.objects.get_or_create(
             phone=phone,
             defaults={
-                'username': f'user_{phone[-8:]}',  # 自动生成用户名
+                'username': f'user_{phone}',  # 用完整手机号避免碰撞
             }
         )
         
-        # 确保用户名为 phone 的用户名格式（如果是新创建的）
-        if not user.username.startswith('user_'):
-            user.username = f'user_{phone[-8:]}'
-            user.save(update_fields=['username'])
+        # 注意：不覆写已有用户的 username（如 admin 账户）
         
         # 查找或创建 app profile
         profile, profile_created = UserAppProfile.objects.get_or_create(

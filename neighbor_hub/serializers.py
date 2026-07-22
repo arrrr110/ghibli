@@ -6,6 +6,7 @@ from .models import (
     Comment,
     TopicLike,
     TopicSubscription,
+    TopicReadRecord,
     Invitation,
     VerificationRequest,
     AppNotification,
@@ -119,47 +120,63 @@ class CommentSerializer(serializers.ModelSerializer):
         return obj.replies.count()
 
 
-class TopicListSerializer(serializers.ModelSerializer):
-    """话题列表序列化器（精简字段，用于列表接口）"""
+class HotCommentSerializer(serializers.ModelSerializer):
+    """热评序列化器（列表页展示3条热门评论）"""
     author_nickname = serializers.CharField(source='author.nickname', read_only=True)
-    community_name = serializers.CharField(source='community.name', read_only=True)
-    is_liked = serializers.SerializerMethodField()
-    is_subscribed = serializers.SerializerMethodField()
+    author_avatar = serializers.CharField(source='author.avatar', read_only=True)
+    
+    class Meta:
+        model = Comment
+        fields = [
+            'id', 'author', 'author_nickname', 'author_avatar',
+            'author_building', 'content', 'likes_count',
+            'created_at'
+        ]
+
+
+class TopicListSerializer(serializers.ModelSerializer):
+    """话题列表序列化器（精简字段，用于首页卡片展示）"""
+    author_nickname = serializers.CharField(source='author.nickname', read_only=True)
+    is_liked = serializers.BooleanField(read_only=True)
+    is_subscribed = serializers.BooleanField(read_only=True)
+    is_read = serializers.BooleanField(read_only=True)
+    read_count = serializers.IntegerField(read_only=True)
+    hot_comments = serializers.SerializerMethodField()
     
     class Meta:
         model = Topic
         fields = [
-            'id', 'community', 'community_name',
+            'id',
             'author', 'author_nickname', 'author_building', 'author_role',
             'title', 'category',
-            'has_image', 'image_url', 'poster_style',
+            'has_image', 'poster_style',
             'likes_count', 'comments_count', 'views_count',
-            'status', 'is_pinned',
-            'is_liked', 'is_subscribed',
-            'created_at', 'updated_at'
+            'is_pinned',
+            'is_liked', 'is_subscribed', 'is_read', 'read_count',
+            'hot_comments',
+            'created_at', 'updated_at',
         ]
-        read_only_fields = [
-            'id', 'author', 'author_building', 'author_role',
-            'likes_count', 'comments_count', 'views_count',
-            'status', 'is_pinned',
-            'created_at', 'updated_at'
-        ]
+        read_only_fields = fields
     
-    def get_is_liked(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.likes.filter(user=request.user).exists()
-        return False
-    
-    def get_is_subscribed(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.subscriptions.filter(user=request.user).exists()
-        return False
+    def get_hot_comments(self, obj):
+        """获取3条热门评论（按点赞数倒序）
+        
+        数据来源：views 中 Prefetch 预取的 _hot_comments 属性
+        如果没有预取（如详情页），则实时查询
+        """
+        # 优先使用 Prefetch 预取的数据（列表页，避免 N+1）
+        if hasattr(obj, '_hot_comments'):
+            comments = obj._hot_comments[:3]
+        else:
+            # 详情页或其他未预取的场景，实时查询
+            comments = Comment.objects.filter(
+                topic=obj, parent__isnull=True, is_active=True
+            ).select_related('author').order_by('-likes_count', '-created_at')[:3]
+        return HotCommentSerializer(comments, many=True).data
 
 
 class TopicDetailSerializer(TopicListSerializer):
-    """话题详情序列化器（包含完整内容）"""
+    """话题详情序列化器（包含完整内容和评论树）"""
     comments = CommentSerializer(many=True, read_only=True)
     
     class Meta(TopicListSerializer.Meta):

@@ -2,11 +2,13 @@ import logging
 import uuid
 from datetime import timedelta
 
-from django.db.models import Q, Count, Prefetch
+from django.db.models import Q, Count, Prefetch, Exists, OuterRef, IntegerField
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status, filters
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.pagination import CursorPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -19,6 +21,7 @@ from .models import (
     Comment,
     TopicLike,
     TopicSubscription,
+    TopicReadRecord,
     Invitation,
     VerificationRequest,
     AppNotification,
@@ -45,6 +48,18 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class TopicCursorPagination(CursorPagination):
+    """话题列表游标分页
+    
+    按置顶 + 创建时间倒序游标分页
+    每页返回 10 条，前端可通过 cursor 参数加载下一页
+    """
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 50
+    ordering = ('-is_pinned', '-created_at')
 
 
 class CurrentUserProfileView(APIView):
@@ -367,18 +382,20 @@ class CommunityViewSet(ModelViewSet):
 class TopicViewSet(ModelViewSet):
     """
     话题 CRUD + 互动接口
-    GET    /api/neighbor-hub/topics/               列表（支持筛选）
+    GET    /api/neighbor-hub/topics/               列表（自动按用户小区筛选，支持 filter 和游标分页）
     POST   /api/neighbor-hub/topics/               创建话题
     GET    /api/neighbor-hub/topics/{id}/          详情
     PATCH  /api/neighbor-hub/topics/{id}/          更新（作者/业委会）
     POST   /api/neighbor-hub/topics/{id}/like/     点赞/取消点赞
     POST   /api/neighbor-hub/topics/{id}/subscribe/ 订阅/取消订阅
+    POST   /api/neighbor-hub/topics/{id}/read/      标记已读
     GET    /api/neighbor-hub/topics/{id}/comments/  评论列表
     POST   /api/neighbor-hub/topics/{id}/comments/  添加评论
     POST   /api/neighbor-hub/topics/{id}/pin/       置顶（业委会）
     """
     permission_classes = [IsAuthenticated]
     lookup_field = 'pk'
+    pagination_class = TopicCursorPagination
     
     def get_serializer_class(self):
         if self.action == 'list':
@@ -390,24 +407,98 @@ class TopicViewSet(ModelViewSet):
         return TopicCreateSerializer
     
     def get_queryset(self):
-        queryset = Topic.objects.select_related('community', 'author').prefetch_related(
-            'comments', 'likes', 'subscriptions'
-        )
-        # 筛选：按小区
-        community_id = self.request.query_params.get('community')
-        if community_id:
-            queryset = queryset.filter(community_id=community_id)
+        user = self.request.user
+        profile = getattr(user, 'neighbor_hub_profile', None)
+        
+        # 没有小区档案的用户看不到任何话题
+        if not profile or not profile.community_id:
+            return Topic.objects.none()
+        
+        # 基础查询：按用户小区筛选
+        queryset = Topic.objects.filter(
+            community_id=profile.community_id
+        ).select_related('community', 'author')
+        
+        # filter 筛选
+        topic_filter = self.request.query_params.get('filter', 'all')
+        
+        if topic_filter == 'unread':
+            # 未读：不存在 TopicReadRecord
+            queryset = queryset.filter(
+                ~Exists(
+                    TopicReadRecord.objects.filter(
+                        topic=OuterRef('pk'), user=user
+                    )
+                )
+            )
+        elif topic_filter == 'read':
+            # 已读：存在 TopicReadRecord
+            queryset = queryset.filter(
+                Exists(
+                    TopicReadRecord.objects.filter(
+                        topic=OuterRef('pk'), user=user
+                    )
+                )
+            )
+        elif topic_filter == 'liked':
+            # 我点赞的
+            queryset = queryset.filter(
+                Exists(
+                    TopicLike.objects.filter(
+                        topic=OuterRef('pk'), user=user
+                    )
+                )
+            )
+        elif topic_filter == 'subscribed':
+            # 我收藏的
+            queryset = queryset.filter(
+                Exists(
+                    TopicSubscription.objects.filter(
+                        topic=OuterRef('pk'), user=user
+                    )
+                )
+            )
+        
         # 筛选：按分类
         category = self.request.query_params.get('category')
         if category:
             queryset = queryset.filter(category=category)
-        # 筛选：按状态
-        status_filter = self.request.query_params.get('status', 'active')
-        queryset = queryset.filter(status=status_filter)
+        
         # 搜索：标题/内容
         search = self.request.query_params.get('search')
         if search:
-            queryset = queryset.filter(Q(title__icontains=search) | Q(content__icontains=search))
+            queryset = queryset.filter(
+                Q(title__icontains=search) | Q(content__icontains=search)
+            )
+        
+        # 用 Exists 子查询标注当前用户的互动状态
+        # Prefetch 预取热评（避免 N+1）
+        from django.db.models import Prefetch
+        hot_comments_qs = Comment.objects.filter(
+            parent__isnull=True, is_active=True
+        ).select_related('author').order_by('-likes_count', '-created_at')
+        
+        queryset = queryset.prefetch_related(
+            Prefetch('comments', queryset=hot_comments_qs, to_attr='_hot_comments')
+        ).annotate(
+            is_liked=Exists(
+                TopicLike.objects.filter(topic=OuterRef('pk'), user=user)
+            ),
+            is_subscribed=Exists(
+                TopicSubscription.objects.filter(topic=OuterRef('pk'), user=user)
+            ),
+            is_read=Exists(
+                TopicReadRecord.objects.filter(topic=OuterRef('pk'), user=user)
+            ),
+            read_count=Coalesce(
+                TopicReadRecord.objects.filter(
+                    topic=OuterRef('pk'), user=user
+                ).values('read_count')[:1],
+                0,
+                output_field=IntegerField(),
+            ),
+        )
+        
         return queryset
     
     def get_permissions(self):
@@ -417,7 +508,7 @@ class TopicViewSet(ModelViewSet):
             return [IsAuthenticated(), IsVerifiedUser()]
         if self.action == 'pin':
             return [IsAuthenticated(), IsCommitteeMember()]
-        if self.action in ('like', 'subscribe'):
+        if self.action in ('like', 'subscribe', 'read'):
             return [IsAuthenticated(), IsVerifiedUser()]
         return [IsAuthenticated(), IsCommitteeOrAuthor()]
     
@@ -454,6 +545,26 @@ class TopicViewSet(ModelViewSet):
             sub.delete()
             return Response({'subscribed': False})
         return Response({'subscribed': True})
+    
+    @action(detail=True, methods=['post'])
+    def read(self, request, pk=None):
+        """标记话题已读
+        
+        前端在用户划过话题卡片或进入详情页时调用
+        首次标记创建记录，重复调用递增 read_count
+        """
+        topic = self.get_object()
+        record, created = TopicReadRecord.objects.get_or_create(
+            topic=topic, user=request.user,
+            defaults={'read_count': 1}
+        )
+        if not created:
+            record.read_count += 1
+            record.save(update_fields=['read_count'])
+        return Response({
+            'is_read': True,
+            'read_count': record.read_count,
+        })
     
     @action(detail=True, methods=['get', 'post'])
     def comments(self, request, pk=None):

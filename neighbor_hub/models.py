@@ -225,12 +225,21 @@ class TopicLike(models.Model):
 
 
 class TopicSubscription(models.Model):
-    """话题订阅记录"""
+    """话题订阅/收藏记录
+    
+    用户收藏的话题集中展示在订阅页
+    is_pinned 用于用户在收藏夹内个人置顶排序
+    """
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='subscriptions')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='topic_subscriptions')
     has_update = models.BooleanField(default=False)
+    
+    # 用户个人置顶（仅影响当前用户的收藏列表排序）
+    is_pinned = models.BooleanField(default=False, verbose_name="个人置顶")
+    pinned_at = models.DateTimeField(null=True, blank=True, verbose_name="置顶时间")
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -239,6 +248,31 @@ class TopicSubscription(models.Model):
         unique_together = ['topic', 'user']
         verbose_name = '话题订阅'
         verbose_name_plural = verbose_name
+        ordering = ['-is_pinned', '-pinned_at', '-updated_at']
+
+
+class TopicReadRecord(models.Model):
+    """话题阅读记录
+    
+    每人每话题一条记录，记录阅读次数和最后阅读时间
+    用于标记已读/未读状态
+    """
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='read_records')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='read_topics')
+    read_count = models.PositiveIntegerField(default=1, verbose_name="阅读次数")
+    last_read_at = models.DateTimeField(auto_now=True, verbose_name="最后阅读时间")
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_topic_read_records'
+        unique_together = ['topic', 'user']
+        verbose_name = '话题阅读'
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=['user', 'last_read_at']),
+        ]
 
 
 class Invitation(models.Model):

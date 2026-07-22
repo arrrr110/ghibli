@@ -60,13 +60,14 @@ Authorization: Bearer <access_token>
 | 小区 | DELETE | `/communities/{id}/` | 已登录 + 业委会 | 删除小区 |
 | 小区 | GET | `/communities/{id}/members/` | 已登录 + 业委会 | 小区成员列表（支持筛选） |
 | 小区 | DELETE | `/communities/{id}/members/{user_id}/` | 已登录 + 业委会 | 删除小区成员 |
-| 话题 | GET | `/topics/` | 已登录 | 话题列表（支持筛选） |
+| 话题 | GET | `/topics/` | 已登录 | 话题列表（自动按用户小区筛选 + 游标分页） |
 | 话题 | POST | `/topics/` | 已登录 + 已认证 | 创建话题 |
 | 话题 | GET | `/topics/{id}/` | 已登录 | 话题详情 |
 | 话题 | PATCH | `/topics/{id}/` | 业委会或作者 | 更新话题 |
 | 话题 | DELETE | `/topics/{id}/` | 业委会或作者 | 删除话题 |
 | 话题 | POST | `/topics/{id}/like/` | 已登录 + 已认证 | 点赞/取消点赞 |
 | 话题 | POST | `/topics/{id}/subscribe/` | 已登录 + 已认证 | 订阅/取消订阅 |
+| 话题 | POST | `/topics/{id}/read/` | 已登录 + 已认证 | 标记已读 |
 | 话题 | GET | `/topics/{id}/comments/` | 已登录 | 获取评论列表 |
 | 话题 | POST | `/topics/{id}/comments/` | 已登录 + 已认证 | 添加评论 |
 | 话题 | POST | `/topics/{id}/pin/` | 已登录 + 业委会 | 置顶/取消置顶 |
@@ -561,14 +562,27 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 
 **权限**: `IsAuthenticated`
 
+**说明**: 自动按当前登录用户的小区筛选，前端无需传 `community` 参数。支持游标分页。
+
 **查询参数**:
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| community | UUID | 否 | 按小区筛选 |
-| category | string | 否 | 按分类筛选 |
-| status | string | 否 | 按状态筛选，默认 `active` |
+| filter | string | 否 | 行为筛选：`all`（默认）/ `unread` / `read` / `liked` / `subscribed` |
+| category | string | 否 | 按分类筛选（见下方可选值），与 `filter` 可组合使用 |
 | search | string | 否 | 搜索标题/内容（模糊匹配） |
+| cursor | string | 否 | 游标分页标记（首次请求不传，加载下一页时传入上次返回的 `next` 值） |
+| page_size | int | 否 | 每页数量，默认 10，最大 50 |
+
+**filter 可选值**:
+
+| 值 | 说明 |
+|----|------|
+| `all` | 默认，全部话题（带已读/未读标记） |
+| `unread` | 仅未读话题 |
+| `read` | 仅已读话题 |
+| `liked` | 我点赞过的话题 |
+| `subscribed` | 我收藏的话题 |
 
 **category 可选值**:
 
@@ -585,43 +599,76 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 | `dispute` | 邻里纠纷 |
 | `other` | 其他 |
 
-**请求示例**: `/topics/?community=uuid&category=notice&search=电梯`
+**请求示例**:
+```
+# 默认：全部话题
+GET /topics/
+
+# 未读 + 设施维修分类
+GET /topics/?filter=unread&category=repair
+
+# 搜索"电梯"关键词
+GET /topics/?search=电梯
+
+# 加载下一页（使用上次返回的 next 值）
+GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
+```
 
 **响应 (HTTP 200)**:
 ```json
-[
-  {
-    "id": "uuid",
-    "community": "uuid",
-    "community_name": "阳光花园",
-    "author": "uuid",
-    "author_nickname": "张三",
-    "author_building": "1号楼",
-    "author_role": "owner",
-    "title": "关于电梯维修的通知",
-    "category": "notice",
-    "has_image": false,
-    "image_url": "",
-    "poster_style": "minimal",
-    "likes_count": 5,
-    "comments_count": 3,
-    "views_count": 50,
-    "status": "active",
-    "is_pinned": false,
-    "is_liked": true,
-    "is_subscribed": false,
-    "created_at": "2026-07-19T10:00:00Z",
-    "updated_at": "2026-07-19T10:00:00Z"
-  }
-]
+{
+  "results": [
+    {
+      "id": "uuid",
+      "author": "uuid",
+      "author_nickname": "张三",
+      "author_building": "1号楼",
+      "author_role": "owner",
+      "title": "关于电梯维修的通知",
+      "category": "notice",
+      "has_image": false,
+      "poster_style": "minimal",
+      "likes_count": 5,
+      "comments_count": 3,
+      "views_count": 50,
+      "is_pinned": false,
+      "is_liked": true,
+      "is_subscribed": false,
+      "is_read": false,
+      "read_count": 0,
+      "hot_comments": [
+        {
+          "id": "uuid",
+          "author": "uuid",
+          "author_nickname": "李四",
+          "author_avatar": "https://...",
+          "author_building": "3栋",
+          "content": "支持！这个问题确实该解决了。",
+          "likes_count": 12,
+          "created_at": "2026-07-19T11:00:00Z"
+        }
+      ],
+      "created_at": "2026-07-19T10:00:00Z",
+      "updated_at": "2026-07-19T10:00:00Z"
+    }
+  ],
+  "next": "cursor_string_for_next_page",
+  "previous": null
+}
 ```
 
 **响应字段说明**:
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| results | array | 话题列表 |
+| next | string\|null | 下一页游标（为 null 表示没有更多了） |
+| previous | string\|null | 上一页游标 |
 | is_liked | boolean | 当前用户是否已点赞 |
-| is_subscribed | boolean | 当前用户是否已订阅 |
+| is_subscribed | boolean | 当前用户是否已收藏 |
+| is_read | boolean | 当前用户是否已读 |
+| read_count | int | 阅读次数（0=未读） |
+| hot_comments | array | 3 条热门评论（按点赞数倒序） |
 | has_image | boolean | 是否有配图 |
 | poster_style | string | 海报样式：gradient/emoji/minimal |
 
@@ -733,11 +780,36 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 }
 ```
 
-**说明**: 再次调用可取消订阅。
+**说明**: 再次调用可取消订阅。订阅的话题会出现在用户的收藏列表中。
 
 ---
 
-### 16. 获取评论列表
+### 16. 标记已读
+
+**POST** `/topics/{id}/read/`
+
+**权限**: `IsAuthenticated` + `IsVerifiedUser`
+
+**说明**: 前端在用户划过话题卡片或进入详情页时调用。首次标记创建阅读记录，重复调用递增 `read_count`。
+
+**响应 (HTTP 200)**:
+```json
+{
+  "is_read": true,
+  "read_count": 2
+}
+```
+
+**响应字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| is_read | boolean | 始终为 true |
+| read_count | int | 阅读次数（1=首次阅读，2+ = 重复阅读） |
+
+---
+
+### 17. 获取评论列表
 
 **GET** `/topics/{id}/comments/`
 
@@ -769,7 +841,7 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 
 ---
 
-### 17. 添加评论
+### 18. 添加评论
 
 **POST** `/topics/{id}/comments/`
 
@@ -796,7 +868,7 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 
 ---
 
-### 18. 置顶/取消置顶话题
+### 19. 置顶/取消置顶话题
 
 **POST** `/topics/{id}/pin/`
 
@@ -824,7 +896,7 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 
 ---
 
-### 19. 我的邀请记录
+### 20. 我的邀请记录
 
 **GET** `/invitations/`
 
@@ -852,7 +924,7 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 
 ---
 
-### 20. 记录邀请关系
+### 21. 记录邀请关系
 
 **POST** `/invitations/`
 
@@ -899,7 +971,7 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 
 ---
 
-### 21. 删除邀请记录
+### 22. 删除邀请记录
 
 **DELETE** `/invitations/{id}/`
 
