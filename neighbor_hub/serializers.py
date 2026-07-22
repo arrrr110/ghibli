@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Prefetch
 from .models import (
     Community,
     NeighborHubProfile,
@@ -95,10 +96,11 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
 
 class CommentSerializer(serializers.ModelSerializer):
     """评论序列化器"""
-    author_nickname = serializers.CharField(source='author.nickname', read_only=True)
-    author_avatar = serializers.CharField(source='author.avatar', read_only=True)
+    author_nickname = serializers.SerializerMethodField()
+    author_avatar = serializers.SerializerMethodField()
     author_building = serializers.CharField(read_only=True)
     replies_count = serializers.SerializerMethodField()
+    replies = serializers.SerializerMethodField()
     
     class Meta:
         model = Comment
@@ -107,7 +109,7 @@ class CommentSerializer(serializers.ModelSerializer):
             'author', 'author_nickname', 'author_avatar',
             'author_building', 'author_role',
             'parent', 'content', 'likes_count',
-            'is_active', 'replies_count',
+            'is_active', 'replies_count', 'replies',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -116,14 +118,39 @@ class CommentSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
     
+    def get_author_nickname(self, obj):
+        """从 NeighborHubProfile 获取昵称，回退到 username"""
+        profile = getattr(obj.author, 'neighbor_hub_profile', None)
+        if profile and profile.nickname:
+            return profile.nickname
+        return obj.author.username
+    
+    def get_author_avatar(self, obj):
+        """从 NeighborHubProfile 获取头像"""
+        profile = getattr(obj.author, 'neighbor_hub_profile', None)
+        return profile.avatar if profile else ''
+    
     def get_replies_count(self, obj):
+        # 优先使用预取数据（避免 N+1 查询）
+        if hasattr(obj, '_prefetched_objects_cache') and 'replies' in obj._prefetched_objects_cache:
+            return len(obj._prefetched_objects_cache['replies'])
         return obj.replies.count()
+    
+    def get_replies(self, obj):
+        """获取回复列表（仅详情页预取时有数据，列表页返回空数组）"""
+        # 优先使用预取数据
+        if hasattr(obj, '_prefetched_objects_cache') and 'replies' in obj._prefetched_objects_cache:
+            replies = obj._prefetched_objects_cache['replies']
+        else:
+            # 没有预取时返回空数组（避免 N+1 查询）
+            return []
+        return CommentSerializer(replies, many=True, context=self.context).data
 
 
 class HotCommentSerializer(serializers.ModelSerializer):
     """热评序列化器（列表页展示3条热门评论）"""
-    author_nickname = serializers.CharField(source='author.nickname', read_only=True)
-    author_avatar = serializers.CharField(source='author.avatar', read_only=True)
+    author_nickname = serializers.SerializerMethodField()
+    author_avatar = serializers.SerializerMethodField()
     
     class Meta:
         model = Comment
@@ -132,15 +159,27 @@ class HotCommentSerializer(serializers.ModelSerializer):
             'author_building', 'content', 'likes_count',
             'created_at'
         ]
+    
+    def get_author_nickname(self, obj):
+        profile = getattr(obj.author, 'neighbor_hub_profile', None)
+        if profile and profile.nickname:
+            return profile.nickname
+        return obj.author.username
+    
+    def get_author_avatar(self, obj):
+        profile = getattr(obj.author, 'neighbor_hub_profile', None)
+        return profile.avatar if profile else ''
 
 
 class TopicListSerializer(serializers.ModelSerializer):
     """话题列表序列化器（精简字段，用于首页卡片展示）"""
-    author_nickname = serializers.CharField(source='author.nickname', read_only=True)
+    author_nickname = serializers.SerializerMethodField()
     is_liked = serializers.BooleanField(read_only=True)
     is_subscribed = serializers.BooleanField(read_only=True)
     is_read = serializers.BooleanField(read_only=True)
     read_count = serializers.IntegerField(read_only=True)
+    subscriptions_count = serializers.IntegerField(read_only=True)
+    readers_count = serializers.IntegerField(read_only=True)
     hot_comments = serializers.SerializerMethodField()
     
     class Meta:
@@ -151,12 +190,20 @@ class TopicListSerializer(serializers.ModelSerializer):
             'title', 'category',
             'has_image', 'poster_style',
             'likes_count', 'comments_count', 'views_count',
+            'subscriptions_count', 'readers_count',
             'is_pinned',
             'is_liked', 'is_subscribed', 'is_read', 'read_count',
             'hot_comments',
             'created_at', 'updated_at',
         ]
         read_only_fields = fields
+    
+    def get_author_nickname(self, obj):
+        """从 NeighborHubProfile 获取昵称，回退到 username"""
+        profile = getattr(obj.author, 'neighbor_hub_profile', None)
+        if profile and profile.nickname:
+            return profile.nickname
+        return obj.author.username
     
     def get_hot_comments(self, obj):
         """获取3条热门评论（按点赞数倒序）
@@ -171,16 +218,46 @@ class TopicListSerializer(serializers.ModelSerializer):
             # 详情页或其他未预取的场景，实时查询
             comments = Comment.objects.filter(
                 topic=obj, parent__isnull=True, is_active=True
-            ).select_related('author').order_by('-likes_count', '-created_at')[:3]
-        return HotCommentSerializer(comments, many=True).data
+            ).select_related('author', 'author__neighbor_hub_profile').order_by('-likes_count', '-created_at')[:3]
+        return HotCommentSerializer(comments, many=True, context=self.context).data
 
 
 class TopicDetailSerializer(TopicListSerializer):
-    """话题详情序列化器（包含完整内容和评论树）"""
-    comments = CommentSerializer(many=True, read_only=True)
+    """话题详情序列化器（包含完整内容、评论树和统计数据）
+    
+    用于话题详情页，返回：
+    - 话题完整内容
+    - 阅读数（readers_count）、订阅数（subscriptions_count）、点赞数（likes_count）
+    - 讨论区：顶级评论列表（含回复树）
+    - 当前用户的互动状态（is_liked/is_subscribed/is_read/read_count）
+    """
+    comments = serializers.SerializerMethodField()
     
     class Meta(TopicListSerializer.Meta):
-        fields = TopicListSerializer.Meta.fields + ['content', 'extra_data']
+        fields = TopicListSerializer.Meta.fields + [
+            'content', 'extra_data', 'comments',
+        ]
+    
+    def get_comments(self, obj):
+        """获取顶级评论列表（含回复树）
+        
+        数据来源：views 中 Prefetch 预取的 _detail_comments 属性
+        每条评论包含 replies 嵌套（回复列表）
+        """
+        if hasattr(obj, '_detail_comments'):
+            comments = obj._detail_comments
+        else:
+            replies_qs = Comment.objects.filter(
+                is_active=True
+            ).select_related('author', 'author__neighbor_hub_profile').order_by('created_at')
+            comments = Comment.objects.filter(
+                topic=obj, parent__isnull=True, is_active=True
+            ).select_related(
+                'author', 'author__neighbor_hub_profile'
+            ).prefetch_related(
+                Prefetch('replies', queryset=replies_qs)
+            ).order_by('-created_at')
+        return CommentSerializer(comments, many=True, context=self.context).data
 
 
 class TopicCreateSerializer(serializers.ModelSerializer):
@@ -221,7 +298,7 @@ class InvitationCreateSerializer(serializers.Serializer):
 
 class InvitationSerializer(serializers.ModelSerializer):
     """邀请记录序列化器"""
-    inviter_nickname = serializers.CharField(source='inviter.nickname', read_only=True)
+    inviter_nickname = serializers.SerializerMethodField()
     community_name = serializers.CharField(source='inviter_community.name', read_only=True)
     
     class Meta:
@@ -236,13 +313,19 @@ class InvitationSerializer(serializers.ModelSerializer):
             'id', 'inviter_community',
             'invitee', 'status', 'accepted_at', 'created_at'
         ]
+    
+    def get_inviter_nickname(self, obj):
+        profile = getattr(obj.inviter, 'neighbor_hub_profile', None)
+        if profile and profile.nickname:
+            return profile.nickname
+        return obj.inviter.username
 
 
 class VerificationRequestSerializer(serializers.ModelSerializer):
     """认证申请序列化器"""
-    user_nickname = serializers.CharField(source='user.nickname', read_only=True)
+    user_nickname = serializers.SerializerMethodField()
     community_name = serializers.CharField(source='community.name', read_only=True)
-    reviewed_by_nickname = serializers.CharField(source='reviewed_by.nickname', read_only=True)
+    reviewed_by_nickname = serializers.SerializerMethodField()
     
     class Meta:
         model = VerificationRequest
@@ -259,6 +342,20 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
             'reviewed_by', 'reviewed_at', 'review_note',
             'created_at', 'updated_at'
         ]
+    
+    def get_user_nickname(self, obj):
+        profile = getattr(obj.user, 'neighbor_hub_profile', None)
+        if profile and profile.nickname:
+            return profile.nickname
+        return obj.user.username
+    
+    def get_reviewed_by_nickname(self, obj):
+        if not obj.reviewed_by:
+            return None
+        profile = getattr(obj.reviewed_by, 'neighbor_hub_profile', None)
+        if profile and profile.nickname:
+            return profile.nickname
+        return obj.reviewed_by.username
 
 
 class VerificationRequestReviewSerializer(serializers.Serializer):

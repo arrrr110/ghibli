@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import timedelta
 
-from django.db.models import Q, Count, Prefetch, Exists, OuterRef, IntegerField
+from django.db.models import Q, Count, Prefetch, Exists, OuterRef, IntegerField, Subquery, F
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status, filters
@@ -414,73 +414,68 @@ class TopicViewSet(ModelViewSet):
         if not profile or not profile.community_id:
             return Topic.objects.none()
         
-        # 基础查询：按用户小区筛选
+        # 基础查询：按用户小区筛选，预取作者档案（nickname/avatar 在 NeighborHubProfile 上）
         queryset = Topic.objects.filter(
             community_id=profile.community_id
-        ).select_related('community', 'author')
+        ).select_related('community', 'author', 'author__neighbor_hub_profile')
         
-        # filter 筛选
-        topic_filter = self.request.query_params.get('filter', 'all')
-        
-        if topic_filter == 'unread':
-            # 未读：不存在 TopicReadRecord
-            queryset = queryset.filter(
-                ~Exists(
-                    TopicReadRecord.objects.filter(
-                        topic=OuterRef('pk'), user=user
+        # 列表页才应用筛选条件（详情页直接按 pk 查询，不受列表筛选影响）
+        if self.action == 'list':
+            # filter 筛选
+            topic_filter = self.request.query_params.get('filter', 'all')
+            
+            if topic_filter == 'unread':
+                # 未读：不存在 TopicReadRecord
+                queryset = queryset.filter(
+                    ~Exists(
+                        TopicReadRecord.objects.filter(
+                            topic=OuterRef('pk'), user=user
+                        )
                     )
                 )
-            )
-        elif topic_filter == 'read':
-            # 已读：存在 TopicReadRecord
-            queryset = queryset.filter(
-                Exists(
-                    TopicReadRecord.objects.filter(
-                        topic=OuterRef('pk'), user=user
+            elif topic_filter == 'read':
+                # 已读：存在 TopicReadRecord
+                queryset = queryset.filter(
+                    Exists(
+                        TopicReadRecord.objects.filter(
+                            topic=OuterRef('pk'), user=user
+                        )
                     )
                 )
-            )
-        elif topic_filter == 'liked':
-            # 我点赞的
-            queryset = queryset.filter(
-                Exists(
-                    TopicLike.objects.filter(
-                        topic=OuterRef('pk'), user=user
+            elif topic_filter == 'liked':
+                # 我点赞的
+                queryset = queryset.filter(
+                    Exists(
+                        TopicLike.objects.filter(
+                            topic=OuterRef('pk'), user=user
+                        )
                     )
                 )
-            )
-        elif topic_filter == 'subscribed':
-            # 我收藏的
-            queryset = queryset.filter(
-                Exists(
-                    TopicSubscription.objects.filter(
-                        topic=OuterRef('pk'), user=user
+            elif topic_filter == 'subscribed':
+                # 我收藏的
+                queryset = queryset.filter(
+                    Exists(
+                        TopicSubscription.objects.filter(
+                            topic=OuterRef('pk'), user=user
+                        )
                     )
                 )
-            )
+            
+            # 筛选：按分类
+            category = self.request.query_params.get('category')
+            if category:
+                queryset = queryset.filter(category=category)
+            
+            # 搜索：标题/内容
+            search = self.request.query_params.get('search')
+            if search:
+                queryset = queryset.filter(
+                    Q(title__icontains=search) | Q(content__icontains=search)
+                )
         
-        # 筛选：按分类
-        category = self.request.query_params.get('category')
-        if category:
-            queryset = queryset.filter(category=category)
-        
-        # 搜索：标题/内容
-        search = self.request.query_params.get('search')
-        if search:
-            queryset = queryset.filter(
-                Q(title__icontains=search) | Q(content__icontains=search)
-            )
-        
-        # 用 Exists 子查询标注当前用户的互动状态
-        # Prefetch 预取热评（避免 N+1）
-        from django.db.models import Prefetch
-        hot_comments_qs = Comment.objects.filter(
-            parent__isnull=True, is_active=True
-        ).select_related('author').order_by('-likes_count', '-created_at')
-        
-        queryset = queryset.prefetch_related(
-            Prefetch('comments', queryset=hot_comments_qs, to_attr='_hot_comments')
-        ).annotate(
+        # 通用标注：当前用户的互动状态 + 统计数据
+        # 注意：Count 必须用 Subquery 包裹，避免多表 JOIN 导致笛卡尔积
+        queryset = queryset.annotate(
             is_liked=Exists(
                 TopicLike.objects.filter(topic=OuterRef('pk'), user=user)
             ),
@@ -490,14 +485,66 @@ class TopicViewSet(ModelViewSet):
             is_read=Exists(
                 TopicReadRecord.objects.filter(topic=OuterRef('pk'), user=user)
             ),
+            # 当前用户的个人阅读次数（0=未读）
             read_count=Coalesce(
-                TopicReadRecord.objects.filter(
-                    topic=OuterRef('pk'), user=user
-                ).values('read_count')[:1],
+                Subquery(
+                    TopicReadRecord.objects.filter(
+                        topic=OuterRef('pk'), user=user
+                    ).values('read_count')[:1]
+                ),
+                0,
+                output_field=IntegerField(),
+            ),
+            # 订阅数（总订阅人数）
+            subscriptions_count=Coalesce(
+                Subquery(
+                    TopicSubscription.objects.filter(topic=OuterRef('pk'))
+                    .order_by().values('topic')
+                    .annotate(c=Count('id')).values('c')
+                ),
+                0,
+                output_field=IntegerField(),
+            ),
+            # 阅读数（总阅读人数）
+            readers_count=Coalesce(
+                Subquery(
+                    TopicReadRecord.objects.filter(topic=OuterRef('pk'))
+                    .order_by().values('topic')
+                    .annotate(c=Count('id')).values('c')
+                ),
                 0,
                 output_field=IntegerField(),
             ),
         )
+        
+        # 预取评论数据（列表页和详情页策略不同）
+        if self.action == 'list':
+            # 列表页：预取热评（避免 N+1）
+            hot_comments_qs = Comment.objects.filter(
+                parent__isnull=True, is_active=True
+            ).select_related(
+                'author', 'author__neighbor_hub_profile'
+            ).order_by('-likes_count', '-created_at')
+            queryset = queryset.prefetch_related(
+                Prefetch('comments', queryset=hot_comments_qs, to_attr='_hot_comments')
+            )
+        elif self.action == 'retrieve':
+            # 详情页：预取顶级评论（含回复），用于讨论区展示
+            replies_qs = Comment.objects.filter(
+                is_active=True
+            ).select_related(
+                'author', 'author__neighbor_hub_profile'
+            ).order_by('created_at')
+            top_comments_qs = Comment.objects.filter(
+                parent__isnull=True, is_active=True
+            ).select_related(
+                'author', 'author__neighbor_hub_profile'
+            ).order_by('-created_at').prefetch_related(
+                Prefetch('replies', queryset=replies_qs)
+            )
+            queryset = queryset.prefetch_related(
+                Prefetch('comments', queryset=top_comments_qs, to_attr='_detail_comments')
+            )
         
         return queryset
     
@@ -552,6 +599,7 @@ class TopicViewSet(ModelViewSet):
         
         前端在用户划过话题卡片或进入详情页时调用
         首次标记创建记录，重复调用递增 read_count
+        同时递增话题的 views_count（总浏览量）
         """
         topic = self.get_object()
         record, created = TopicReadRecord.objects.get_or_create(
@@ -561,9 +609,13 @@ class TopicViewSet(ModelViewSet):
         if not created:
             record.read_count += 1
             record.save(update_fields=['read_count'])
+        # 原子递增话题浏览量
+        Topic.objects.filter(pk=topic.pk).update(views_count=F('views_count') + 1)
+        topic.refresh_from_db(fields=['views_count'])
         return Response({
             'is_read': True,
             'read_count': record.read_count,
+            'views_count': topic.views_count,
         })
     
     @action(detail=True, methods=['get', 'post'])
@@ -571,10 +623,17 @@ class TopicViewSet(ModelViewSet):
         """获取评论列表 / 添加评论"""
         topic = self.get_object()
         if request.method == 'GET':
-            # 顶级评论
+            # 顶级评论（含回复预取）
+            replies_qs = Comment.objects.filter(
+                is_active=True
+            ).select_related('author', 'author__neighbor_hub_profile').order_by('created_at')
             comments = Comment.objects.filter(
                 topic=topic, parent__isnull=True, is_active=True
-            ).select_related('author')
+            ).select_related(
+                'author', 'author__neighbor_hub_profile'
+            ).prefetch_related(
+                Prefetch('replies', queryset=replies_qs)
+            ).order_by('-created_at')
             serializer = CommentSerializer(comments, many=True, context={'request': request})
             return Response(serializer.data)
         # POST 添加评论
@@ -601,11 +660,12 @@ class TopicViewSet(ModelViewSet):
         topic.save(update_fields=['comments_count'])
         # 通知被回复者
         if parent and parent.author != request.user:
+            nickname = profile.nickname if profile else None
             AppNotification.objects.create(
                 user=parent.author,
                 type=AppNotification.Type.TOPIC_REPLY,
                 title='有人回复了你的评论',
-                content=f'{request.user.nickname or request.user.username} 回复了你',
+                content=f'{nickname or request.user.username} 回复了你',
                 related_id=str(topic.id)
             )
         serializer = CommentSerializer(comment, context={'request': request})

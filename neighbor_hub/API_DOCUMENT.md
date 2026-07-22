@@ -630,6 +630,8 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
       "likes_count": 5,
       "comments_count": 3,
       "views_count": 50,
+      "subscriptions_count": 8,
+      "readers_count": 42,
       "is_pinned": false,
       "is_liked": true,
       "is_subscribed": false,
@@ -663,10 +665,15 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 | results | array | 话题列表 |
 | next | string\|null | 下一页游标（为 null 表示没有更多了） |
 | previous | string\|null | 上一页游标 |
+| likes_count | int | 点赞数 |
+| comments_count | int | 评论数 |
+| views_count | int | 浏览量（每次标记已读时递增） |
+| subscriptions_count | int | 订阅数（总订阅人数） |
+| readers_count | int | 阅读数（总阅读人数） |
 | is_liked | boolean | 当前用户是否已点赞 |
 | is_subscribed | boolean | 当前用户是否已收藏 |
 | is_read | boolean | 当前用户是否已读 |
-| read_count | int | 阅读次数（0=未读） |
+| read_count | int | 当前用户的个人阅读次数（0=未读） |
 | hot_comments | array | 3 条热门评论（按点赞数倒序） |
 | has_image | boolean | 是否有配图 |
 | poster_style | string | 海报样式：gradient/emoji/minimal |
@@ -716,7 +723,105 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 **权限**: `IsAuthenticated`
 
-**响应 (HTTP 200)**: 话题详情（包含完整 `content`、`extra_data` 和 `comments` 嵌套）
+**说明**: 用于话题详情页，返回话题完整内容、统计数据（阅读数/订阅数/点赞数）和讨论区（评论树）。
+
+**响应 (HTTP 200)**:
+```json
+{
+  "id": "uuid",
+  "author": "uuid",
+  "author_nickname": "张三",
+  "author_building": "1号楼",
+  "author_role": "owner",
+  "title": "关于电梯维修的通知",
+  "category": "notice",
+  "has_image": false,
+  "poster_style": "minimal",
+  "likes_count": 5,
+  "comments_count": 3,
+  "views_count": 50,
+  "subscriptions_count": 8,
+  "readers_count": 42,
+  "is_pinned": false,
+  "is_liked": true,
+  "is_subscribed": false,
+  "is_read": false,
+  "read_count": 0,
+  "hot_comments": [
+    {
+      "id": "uuid",
+      "author": "uuid",
+      "author_nickname": "李四",
+      "author_avatar": "https://...",
+      "author_building": "3栋",
+      "content": "支持！这个问题确实该解决了。",
+      "likes_count": 12,
+      "created_at": "2026-07-19T11:00:00Z"
+    }
+  ],
+  "content": "电梯维修通知全文内容...",
+  "extra_data": {},
+  "comments": [
+    {
+      "id": "uuid",
+      "topic": "uuid",
+      "author": "uuid",
+      "author_nickname": "李四",
+      "author_avatar": "https://...",
+      "author_building": "3栋",
+      "author_role": "owner",
+      "parent": null,
+      "content": "支持！这个问题确实该解决了。",
+      "likes_count": 12,
+      "is_active": true,
+      "replies_count": 2,
+      "replies": [
+        {
+          "id": "uuid",
+          "topic": "uuid",
+          "author": "uuid",
+          "author_nickname": "王五",
+          "author_avatar": "https://...",
+          "author_building": "5栋",
+          "author_role": "committee",
+          "parent": "uuid",
+          "content": "已安排维修，预计明天完成",
+          "likes_count": 3,
+          "is_active": true,
+          "replies_count": 0,
+          "replies": [],
+          "created_at": "2026-07-19T11:30:00Z",
+          "updated_at": "2026-07-19T11:30:00Z"
+        }
+      ],
+      "created_at": "2026-07-19T11:00:00Z",
+      "updated_at": "2026-07-19T11:00:00Z"
+    }
+  ],
+  "created_at": "2026-07-19T10:00:00Z",
+  "updated_at": "2026-07-19T10:00:00Z"
+}
+```
+
+**响应字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| content | string | 话题完整内容 |
+| extra_data | object | 扩展数据 |
+| likes_count | int | 点赞数 |
+| comments_count | int | 评论数 |
+| views_count | int | 浏览量（每次标记已读时递增） |
+| subscriptions_count | int | 订阅数（总订阅人数） |
+| readers_count | int | 阅读数（总阅读人数） |
+| is_liked | boolean | 当前用户是否已点赞 |
+| is_subscribed | boolean | 当前用户是否已收藏 |
+| is_read | boolean | 当前用户是否已读 |
+| read_count | int | 当前用户的个人阅读次数（0=未读） |
+| comments | array | 讨论区：顶级评论列表（含回复树） |
+| comments[].replies | array | 该评论的回复列表（嵌套一层） |
+| comments[].replies_count | int | 该评论的回复数 |
+| hot_comments | array | 3 条热门评论（列表页用，详情页也有） |
 
 ---
 
@@ -789,13 +894,14 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 **权限**: `IsAuthenticated` + `IsVerifiedUser`
 
-**说明**: 前端在用户划过话题卡片或进入详情页时调用。首次标记创建阅读记录，重复调用递增 `read_count`。
+**说明**: 前端在用户划过话题卡片或进入详情页时调用。首次标记创建阅读记录，重复调用递增 `read_count`，同时递增话题的 `views_count`（总浏览量）。
 
 **响应 (HTTP 200)**:
 ```json
 {
   "is_read": true,
-  "read_count": 2
+  "read_count": 2,
+  "views_count": 51
 }
 ```
 
@@ -804,7 +910,8 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | is_read | boolean | 始终为 true |
-| read_count | int | 阅读次数（1=首次阅读，2+ = 重复阅读） |
+| read_count | int | 当前用户的个人阅读次数（1=首次阅读，2+ = 重复阅读） |
+| views_count | int | 话题总浏览量（递增后） |
 
 ---
 
@@ -830,13 +937,32 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
     "likes_count": 2,
     "is_active": true,
     "replies_count": 1,
+    "replies": [
+      {
+        "id": "uuid",
+        "topic": "uuid",
+        "author": "uuid",
+        "author_nickname": "王五",
+        "author_avatar": "头像URL",
+        "author_building": "5栋",
+        "author_role": "committee",
+        "parent": "uuid",
+        "content": "已安排处理",
+        "likes_count": 1,
+        "is_active": true,
+        "replies_count": 0,
+        "replies": [],
+        "created_at": "2026-07-19T11:00:00Z",
+        "updated_at": "2026-07-19T11:00:00Z"
+      }
+    ],
     "created_at": "2026-07-19T10:00:00Z",
     "updated_at": "2026-07-19T10:00:00Z"
   }
 ]
 ```
 
-**说明**: 返回顶级评论（parent 为 null），不包含回复（回复需通过 replies 嵌套查看）。
+**说明**: 返回顶级评论（parent 为 null），每条评论包含 `replies` 嵌套回复列表（一级）。
 
 ---
 
@@ -1325,6 +1451,7 @@ const submitVerification = async (formData) => {
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v1.5.0 | 2026-07-23 | 话题详情接口优化：修复 500 错误（Coalesce+Subquery）；新增 `subscriptions_count`（订阅数）、`readers_count`（阅读数）字段；修复 `author_nickname`/`author_avatar` 从 NeighborHubProfile 获取（v1.4.0 重构遗留）；详情页返回评论树（含 replies 嵌套）；评论列表接口增加 replies 嵌套；`read` 接口递增 `views_count` 并返回；详情页不再受列表筛选参数影响 |
 | v1.4.0 | 2026-07-20 | 用户模型重构：User 只负责基础认证（phone/email/username+password）；nickname、avatar 移至 NeighborHubProfile（应用专属）；UserAppProfile 作为应用标记，业委会可删除应用标记禁用用户访问 |
 | v1.3.0 | 2026-07-20 | 邀请系统重构：移除邀请码机制，改为链接+二维码模式；前端生成邀请链接 `/join?inviter={user_id}`；后端只负责记录邀请关系 `POST /invitations/ {"inviter": "xxx"}`；过期时间调整为30天 |
 | v1.2.0 | 2026-07-19 | 新增 POST `/users/me/switch-community/` 小区切换接口；新增业委会权限管理规则 |
