@@ -25,7 +25,9 @@ class NeighborHubProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'nickname', 'avatar', 'community', 'role', 'building', 'is_verified', 'created_at')
     list_filter = ('role', 'is_verified', 'community')
     search_fields = ('user__username', 'user__phone', 'nickname', 'building')
-    readonly_fields = ('user_id', 'user')
+    readonly_fields = ('user', 'user_id', 'verified_by', 'verified_at', 'last_login_at', 'created_at', 'updated_at')
+    ordering = ('-updated_at',)
+    date_hierarchy = 'updated_at'
 
 
 @admin.register(Topic)

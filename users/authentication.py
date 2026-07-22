@@ -68,29 +68,39 @@ def get_or_create_user_by_phone(phone, app_name, nickname='', invited_by=None):
             try:
                 from neighbor_hub.models import NeighborHubProfile
                 
-                # 准备创建参数
+                # 基础创建参数（默认业主身份）
                 defaults = {
                     'nickname': nickname or f'{phone[:3]}****{phone[-4:]}',
                     'role': NeighborHubProfile.Role.OWNER,
                 }
                 
+                # 有邀请人：一次性查询并设置所有关联字段
+                if invited_by:
+                    try:
+                        inviter = User.objects.select_related('neighbor_hub_profile').get(id=invited_by)
+                        inviter_profile = getattr(inviter, 'neighbor_hub_profile', None)
+                        
+                        if inviter_profile and inviter_profile.community_id:
+                            # 邀请人小区即为新用户小区
+                            defaults['community'] = inviter_profile.community
+                            # 邀请人关系
+                            defaults['invited_by'] = inviter
+                            logger.info(
+                                f'被邀请用户 {user.id} → 小区 {inviter_profile.community_id}, '
+                                f'邀请人 {invited_by}'
+                            )
+                        else:
+                            logger.warning(f'邀请人 {invited_by} 无小区档案，无法复制小区信息')
+                    except User.DoesNotExist:
+                        logger.warning(f'邀请人不存在: {invited_by}')
+                
+                # 一次 get_or_create 搞定，无需二次更新
                 neighbor_profile, neighbor_profile_created = NeighborHubProfile.objects.get_or_create(
                     user=user,
                     defaults=defaults
                 )
-                
-                # 如果是新用户且有邀请人，设置邀请关系
-                if (user_created or neighbor_profile_created) and invited_by:
-                    try:
-                        inviter_user = User.objects.get(id=invited_by)
-                        neighbor_profile.invited_by = inviter_user
-                        neighbor_profile.save(update_fields=['invited_by'])
-                        logger.info(f'为用户 {user.id} 设置邀请人 {invited_by}')
-                    except User.DoesNotExist:
-                        logger.warning(f'邀请人不存在: {invited_by}')
-                        
+                    
             except ImportError:
-                # 如果neighbor_hub应用不可用，跳过创建
                 logger.warning('neighbor_hub应用不可用，跳过创建NeighborHubProfile')
             except Exception as e:
                 logger.error(f'创建NeighborHubProfile失败: {e}')

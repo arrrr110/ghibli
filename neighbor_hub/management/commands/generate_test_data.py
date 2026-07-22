@@ -305,7 +305,7 @@ class Command(BaseCommand):
                 role = NeighborHubProfile.Role.OWNER
                 is_verified = random.choice([True, True, True, False])  # 75%通过
             else:
-                role = NeighborHubProfile.Role.UNVERIFIED
+                role = NeighborHubProfile.Role.OWNER
                 is_verified = False
             
             # 分配小区

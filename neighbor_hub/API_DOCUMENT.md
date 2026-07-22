@@ -30,7 +30,6 @@ Authorization: Bearer <access_token>
 | `owner` | 业主 | 已通过身份认证的普通用户 |
 | `committee` | 业委会 | 小区业委会成员，拥有管理权限 |
 | `property` | 物业 | 物业管理人员 |
-| `unverified` | 待认证 | 未认证用户（默认值） |
 
 ### 自定义权限类
 
@@ -108,7 +107,7 @@ Authorization: Bearer <access_token>
   "phone": "138****8000",
   "community": "uuid-or-null",
   "community_name": "小区名称",
-  "role": "owner|committee|property|unverified",
+  "role": "owner|committee|property",
   "building": "1号楼",
   "bio": "个人简介",
   "is_verified": true,
@@ -187,7 +186,7 @@ Authorization: Bearer <access_token>
 
 **功能说明**:
 - 用户可自由切换到任意已激活的小区
-- 切换后认证状态自动重置为未认证（`is_verified=False, role=unverified`）
+- 切换后认证状态自动重置为未认证（`is_verified=False, role=owner`）
 - 用户切换回原小区后，同样需要重新认证
 - 小区切换后，用户仅能访问新小区的话题、评论等数据
 
@@ -213,7 +212,7 @@ Authorization: Bearer <access_token>
     "phone": "138****8000",
     "community": "新小区UUID",
     "community_name": "新小区名称",
-    "role": "unverified",
+    "role": "owner",
     "building": "",
     "is_verified": false,
     "verified_at": null,
@@ -258,9 +257,9 @@ Authorization: Bearer <access_token>
 
 | 原状态 | 切换后状态 | 说明 |
 |--------|-----------|------|
-| `is_verified=True, role=owner` | `is_verified=False, role=unverified` | 认证自动失效 |
-| `is_verified=True, role=committee` | `is_verified=False, role=unverified` | 业委会身份不继承 |
-| `is_verified=False, role=unverified` | 保持不变 | 无影响 |
+| `is_verified=True, role=owner` | `is_verified=False, role=owner` | 认证自动失效 |
+| `is_verified=True, role=committee` | `is_verified=False, role=owner` | 业委会身份不继承 |
+| `is_verified=False, role=owner` | 保持不变 | 无影响 |
 
 ### 设计理由
 
@@ -474,11 +473,11 @@ GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | is_verified | boolean | 否 | 按认证状态筛选：`true` 已认证 / `false` 未认证 |
-| role | string | 否 | 按角色筛选：`owner`/`committee`/`property`/`unverified` |
+| role | string | 否 | 按角色筛选：`owner`/`committee`/`property` |
 
 **请求示例**:
 ```
-GET /communities/{id}/members/?is_verified=false&role=unverified
+GET /communities/{id}/members/?is_verified=false&role=owner
 GET /communities/{id}/members/?is_verified=true
 GET /communities/{id}/members/?role=owner
 ```

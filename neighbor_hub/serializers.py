@@ -201,7 +201,7 @@ class TopicCreateSerializer(serializers.ModelSerializer):
             attrs['author'] = request.user
             profile = getattr(request.user, 'neighbor_hub_profile', None)
             attrs['author_building'] = profile.building if profile else ''
-            attrs['author_role'] = profile.role if profile else 'unverified'
+            attrs['author_role'] = profile.role if profile else 'owner'
         return attrs
 
 

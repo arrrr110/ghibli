@@ -220,7 +220,7 @@ class SwitchCommunityView(APIView):
         # 执行小区切换：重置认证状态
         profile.community = target_community
         profile.is_verified = False
-        profile.role = NeighborHubProfile.Role.UNVERIFIED
+        profile.role = NeighborHubProfile.Role.OWNER
         profile.verified_by = None
         profile.verified_at = None
         profile.verification_note = ''
@@ -276,7 +276,7 @@ class CommunityViewSet(ModelViewSet):
         
         查询参数:
         - is_verified: true/false  按认证状态筛选
-        - role: owner/committee/property/unverified  按角色筛选
+        - role: owner/committee/property  按角色筛选
         """
         # 仅业委会可访问
         profile = getattr(request.user, 'neighbor_hub_profile', None)
@@ -593,7 +593,7 @@ class TopicViewSet(ModelViewSet):
             topic=topic,
             author=request.user,
             author_building=profile.building if profile else '',
-            author_role=profile.role if profile else 'unverified',
+            author_role=profile.role if profile else 'owner',
             parent=parent,
             content=content
         )
