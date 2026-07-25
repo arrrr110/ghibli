@@ -12,6 +12,7 @@ from rest_framework.pagination import CursorPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.generics import GenericAPIView
 from rest_framework.viewsets import ModelViewSet
 
 from .models import (
@@ -41,6 +42,7 @@ from .serializers import (
     TopicCreateSerializer,
     TopicImageSerializer,
     TopicImageUploadSerializer,
+    AvatarUploadSerializer,
     CommentSerializer,
     InvitationSerializer,
     InvitationCreateSerializer,
@@ -164,20 +166,62 @@ class CurrentUserProfileView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
-    
-    def patch(self, request):
+
+
+class AvatarUploadView(GenericAPIView):
+    """
+    上传用户头像
+    POST /api/neighbor-hub/users/me/avatar/
+    """
+    serializer_class = AvatarUploadSerializer
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        file_obj = request.FILES.get('avatar')
+        if not file_obj:
+            return Response(
+                {'avatar': '请选择要上传的图片'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 校验图片大小和格式
+        from .services.oss_client import validate_image, upload_avatar, delete_oss_object_by_url
+        ext, error = validate_image(file_obj)
+        if error:
+            return Response(
+                {'avatar': error},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         profile = getattr(request.user, 'neighbor_hub_profile', None)
         if not profile:
             return Response(
                 {'error': '用户档案不存在'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        serializer = NeighborHubProfileSerializer(
-            profile, data=request.data, partial=True, context={'request': request}
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
+
+        # 删除旧头像（如果有）
+        if profile.avatar:
+            delete_oss_object_by_url(profile.avatar)
+
+        # 上传新头像
+        try:
+            result = upload_avatar(str(request.user.id), file_obj)
+        except Exception as e:
+            logger.error(f'头像上传失败: {e}')
+            return Response(
+                {'error': '头像上传失败，请稍后重试'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # 更新 profile
+        profile.avatar = result['image_url']
+        profile.save(update_fields=['avatar'])
+
+        return Response({
+            'avatar': result['image_url'],
+            'message': '头像更新成功',
+        }, status=status.HTTP_200_OK)
 
 
 class SwitchCommunityView(APIView):

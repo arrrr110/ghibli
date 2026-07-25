@@ -371,6 +371,45 @@ GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
 
 ---
 
+### 5. 上传用户头像
+
+**POST** `/users/me/avatar/`
+
+**权限**: `IsAuthenticated`
+
+**Content-Type**: `multipart/form-data`
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| avatar | file | ✅ | 头像图片文件（≤500KB，支持 jpg/jpeg/png/webp/gif） |
+
+**功能说明**:
+- 上传头像到 OSS，存储路径为 `avatars/{user_id}/{uuid}.{ext}`
+- 更新 `NeighborHubProfile.avatar` 字段为新的图片 URL
+- 如果已有旧头像，自动删除 OSS 中的旧头像文件
+
+**响应 (HTTP 200)**:
+```json
+{
+  "avatar": "https://neighbor-hub.oss-cn-shanghai.aliyuncs.com/avatars/xxx/yyy.jpg",
+  "message": "头像更新成功"
+}
+```
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 400 | 未上传文件 | `{"avatar": "请选择要上传的图片"}` |
+| 400 | 图片超过 500KB | `{"avatar": "图片大小不能超过 500KB（当前 xxxKB）"}` |
+| 400 | 格式不支持 | `{"avatar": "不支持的图片格式..."}` |
+| 404 | 用户档案不存在 | `{"error": "用户档案不存在"}` |
+| 500 | OSS 上传失败 | `{"error": "头像上传失败，请稍后重试"}` |
+
+---
+
 ## 二、小区接口
 
 ---
@@ -681,6 +720,7 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 | is_read | boolean | 当前用户是否已读 |
 | read_count | int | 当前用户的个人阅读次数（0=未读） |
 | hot_comments | array | 3 条热门评论（按点赞数倒序） |
+| author_avatar | string | 作者头像 URL（无头像时为空字符串） |
 | has_image | boolean | 是否有配图 |
 | cover_image | string\|null | 封面图 URL（第一张图片），无图时为 null |
 | poster_style | string | 海报样式：gradient/emoji/minimal |
@@ -1653,6 +1693,19 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 // 注意：邀请链接由前端生成，后端不参与
 // 格式: https://your-domain.com/join?inviter={user_id}
 
+// ==================== 用户头像 ====================
+
+// 上传用户头像（multipart/form-data）
+const uploadAvatar = async (file) => {
+  const formData = new FormData()
+  formData.append('avatar', file)
+  const { data } = await axios.post('/api/neighbor-hub/users/me/avatar/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+  return data
+  // { avatar: 'https://...', message: '头像更新成功' }
+}
+
 // ==================== 话题相关 ====================
 
 // 获取或创建草稿话题（进入创建话题页面时调用）
@@ -1757,6 +1810,7 @@ const submitVerification = async (formData) => {
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v2.1.0 | 2026-07-25 | 用户头像上传接口（POST /users/me/avatar/）；话题列表/详情返回 author_avatar 字段；话题列表返回 cover_image 字段（封面图 URL）；删除重复的 patch 方法 |
 | v2.0.0 | 2026-07-25 | 图片上传功能：新增草稿话题机制（POST /topics/draft/、POST /topics/{id}/publish/）；新增图片上传/列表/删除接口（基于阿里云 OSS）；新增 TopicImage 模型；Topic 移除 image_url 字段，改为多图模型；列表页排除草稿话题；详情页返回 images 字段 |
 | v1.5.0 | 2026-07-23 | 话题详情接口优化：修复 500 错误（Coalesce+Subquery）；新增 `subscriptions_count`（订阅数）、`readers_count`（阅读数）字段；修复 `author_nickname`/`author_avatar` 从 NeighborHubProfile 获取（v1.4.0 重构遗留）；详情页返回评论树（含 replies 嵌套）；评论列表接口增加 replies 嵌套；`read` 接口递增 `views_count` 并返回；详情页不再受列表筛选参数影响 |
 | v1.4.0 | 2026-07-20 | 用户模型重构：User 只负责基础认证（phone/email/username+password）；nickname、avatar 移至 NeighborHubProfile（应用专属）；UserAppProfile 作为应用标记，业委会可删除应用标记禁用用户访问 |

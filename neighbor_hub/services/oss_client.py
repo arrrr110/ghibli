@@ -177,3 +177,71 @@ def delete_oss_object(oss_key: str) -> bool:
     except Exception as e:
         logger.error(f'删除 OSS 对象失败: {oss_key} - {e}')
         return False
+
+
+def upload_avatar(user_id: str, file_obj) -> dict:
+    """
+    上传用户头像到 OSS
+
+    Args:
+        user_id: 用户 UUID（字符串）
+        file_obj: 上传的文件对象
+
+    Returns:
+        dict: {
+            'oss_key': str,      — OSS 中的对象 key
+            'image_url': str,    — 可访问的完整 URL
+        }
+
+    Raises:
+        Exception: OSS 上传失败时抛出
+    """
+    ext = _get_file_extension(file_obj.name)
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    oss_key = f"avatars/{user_id}/{filename}"
+
+    bucket = _get_bucket()
+
+    # 读取文件内容
+    file_obj.seek(0)
+    data = file_obj.read()
+
+    # 上传到 OSS
+    content_type = _MIME_TYPES.get(ext, 'application/octet-stream')
+    result = bucket.put_object(oss_key, data, headers={
+        'Content-Type': content_type,
+        'Content-Disposition': 'inline',
+    })
+    if result.status != 200:
+        raise Exception(f'OSS 上传失败，HTTP {result.status}')
+
+    logger.info(f'头像上传成功: {oss_key} ({len(data)} bytes)')
+
+    return {
+        'oss_key': oss_key,
+        'image_url': _build_image_url(oss_key),
+    }
+
+
+def delete_oss_object_by_url(url: str) -> bool:
+    """
+    从图片 URL 中提取 oss_key 并删除 OSS 对象
+
+    用于头像更新时删除旧头像（NeighborHubProfile 只存储 URL，不存储 oss_key）。
+
+    Args:
+        url: 图片访问 URL
+
+    Returns:
+        bool: 是否删除成功
+    """
+    if not url:
+        return False
+
+    domain = settings.OSS_CUSTOM_DOMAIN.rstrip('/')
+    if url.startswith(domain):
+        oss_key = url[len(domain) + 1:]  # 去掉域名前缀 + '/'
+        return delete_oss_object(oss_key)
+
+    logger.warning(f'URL 不属于当前 OSS 域名，跳过删除: {url}')
+    return False

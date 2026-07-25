@@ -193,6 +193,7 @@ class TopicImageUploadSerializer(serializers.Serializer):
 class TopicListSerializer(serializers.ModelSerializer):
     """话题列表序列化器（精简字段，用于首页卡片展示）"""
     author_nickname = serializers.SerializerMethodField()
+    author_avatar = serializers.SerializerMethodField()
     is_liked = serializers.BooleanField(read_only=True)
     is_subscribed = serializers.BooleanField(read_only=True)
     is_read = serializers.BooleanField(read_only=True)
@@ -206,7 +207,7 @@ class TopicListSerializer(serializers.ModelSerializer):
         model = Topic
         fields = [
             'id',
-            'author', 'author_nickname', 'author_building', 'author_role',
+            'author', 'author_nickname', 'author_avatar', 'author_building', 'author_role',
             'title', 'category',
             'has_image', 'cover_image', 'poster_style',
             'likes_count', 'comments_count', 'views_count',
@@ -224,6 +225,11 @@ class TopicListSerializer(serializers.ModelSerializer):
         if profile and profile.nickname:
             return profile.nickname
         return obj.author.username
+
+    def get_author_avatar(self, obj):
+        """从 NeighborHubProfile 获取头像 URL"""
+        profile = getattr(obj.author, 'neighbor_hub_profile', None)
+        return profile.avatar if profile and profile.avatar else ''
 
     def get_hot_comments(self, obj):
         """获取3条热门评论（按点赞数倒序）
@@ -289,6 +295,11 @@ class TopicDetailSerializer(TopicListSerializer):
         else:
             images = obj.images.all()
         return TopicImageSerializer(images, many=True, context=self.context).data
+
+
+class AvatarUploadSerializer(serializers.Serializer):
+    """头像上传表单序列化器（仅用于 DRF Browsable API 渲染文件上传表单）"""
+    avatar = serializers.FileField(help_text="上传头像图片（≤500KB，支持 jpg/jpeg/png/webp/gif）")
 
 
 class TopicCreateSerializer(serializers.ModelSerializer):
