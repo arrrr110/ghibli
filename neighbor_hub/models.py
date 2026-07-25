@@ -1,7 +1,8 @@
 import uuid
 from django.db import models
 from django.conf import settings
-from django.core.validators import MinLengthValidator
+from django.db.models.signals import pre_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 
@@ -148,19 +149,21 @@ class Topic(models.Model):
     author_building = models.CharField(max_length=50, verbose_name="作者楼号")
     author_role = models.CharField(max_length=20, choices=NeighborHubProfile.Role.choices)
     
-    title = models.CharField(max_length=100, validators=[MinLengthValidator(2)])
-    content = models.TextField()
+    title = models.CharField(max_length=100, blank=True, verbose_name="标题")
+    content = models.TextField(blank=True, verbose_name="内容")
     category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
-    
+
     has_image = models.BooleanField(default=False)
-    image_url = models.URLField(blank=True)
     poster_style = models.CharField(max_length=10, choices=PosterStyle.choices, default=PosterStyle.MINIMAL)
-    
+
+    # 草稿标记：草稿话题不展示在信息流中
+    is_draft = models.BooleanField(default=False, verbose_name="草稿")
+
     # 统计数据
     likes_count = models.PositiveIntegerField(default=0)
     comments_count = models.PositiveIntegerField(default=0)
     views_count = models.PositiveIntegerField(default=0)
-    
+
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     is_pinned = models.BooleanField(default=False, verbose_name="置顶")
     extra_data = models.JSONField(default=dict, blank=True)
@@ -175,7 +178,44 @@ class Topic(models.Model):
         verbose_name_plural = verbose_name
     
     def __str__(self):
-        return self.title
+        return self.title or '(草稿)'
+
+
+class TopicImage(models.Model):
+    """话题图片"""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    topic = models.ForeignKey(
+        Topic, on_delete=models.CASCADE, related_name='images'
+    )
+    image_url = models.URLField(verbose_name="图片访问URL")
+    oss_key = models.CharField(max_length=255, verbose_name="OSS对象key")
+    sort_order = models.PositiveIntegerField(default=0, verbose_name="排序")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'neighbor_hub_topic_images'
+        ordering = ['sort_order', 'created_at']
+        verbose_name = '话题图片'
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return self.image_url
+
+
+@receiver(pre_delete, sender=TopicImage)
+def _topic_image_pre_delete(sender, instance, **kwargs):
+    """删除 TopicImage 时同步删除 OSS 上的文件
+
+    使用 pre_delete 信号而非覆盖 delete() 方法，
+    确保以下场景都能清理 OSS：
+    - 实例 delete() 调用
+    - queryset 批量 delete()（如 TopicImage.objects.filter(...).delete()）
+    - 话题 CASCADE 级联删除
+    """
+    from .services.oss_client import delete_oss_object
+    if instance.oss_key:
+        delete_oss_object(instance.oss_key)
 
 
 class Comment(models.Model):

@@ -18,6 +18,7 @@ from .models import (
     Community,
     NeighborHubProfile,
     Topic,
+    TopicImage,
     Comment,
     TopicLike,
     TopicSubscription,
@@ -38,6 +39,8 @@ from .serializers import (
     TopicListSerializer,
     TopicDetailSerializer,
     TopicCreateSerializer,
+    TopicImageSerializer,
+    TopicImageUploadSerializer,
     CommentSerializer,
     InvitationSerializer,
     InvitationCreateSerializer,
@@ -381,11 +384,16 @@ class CommunityViewSet(ModelViewSet):
 
 class TopicViewSet(ModelViewSet):
     """
-    话题 CRUD + 互动接口
-    GET    /api/neighbor-hub/topics/               列表（自动按用户小区筛选，支持 filter 和游标分页）
-    POST   /api/neighbor-hub/topics/               创建话题
+    话题 CRUD + 互动接口 + 图片上传
+    GET    /api/neighbor-hub/topics/               列表（自动按用户小区筛选，排除草稿）
+    POST   /api/neighbor-hub/topics/               创建话题（直接发布，无需草稿）
+    POST   /api/neighbor-hub/topics/draft/         获取或创建草稿话题
     GET    /api/neighbor-hub/topics/{id}/          详情
     PATCH  /api/neighbor-hub/topics/{id}/          更新（作者/业委会）
+    POST   /api/neighbor-hub/topics/{id}/publish/  发布草稿话题
+    GET    /api/neighbor-hub/topics/{id}/images/   获取图片列表
+    POST   /api/neighbor-hub/topics/{id}/images/   上传图片（multipart，≤500KB）
+    DELETE /api/neighbor-hub/topics/{id}/images/{image_id}/  删除图片
     POST   /api/neighbor-hub/topics/{id}/like/     点赞/取消点赞
     POST   /api/neighbor-hub/topics/{id}/subscribe/ 订阅/取消订阅
     POST   /api/neighbor-hub/topics/{id}/read/      标记已读
@@ -404,6 +412,11 @@ class TopicViewSet(ModelViewSet):
             return TopicDetailSerializer
         if self.action == 'create':
             return TopicCreateSerializer
+        if self.action == 'images':
+            # GET 用图片列表序列化器，POST 用上传表单序列化器（让 DRF 页面渲染文件选择框）
+            if self.request.method == 'GET':
+                return TopicImageSerializer
+            return TopicImageUploadSerializer
         return TopicCreateSerializer
     
     def get_queryset(self):
@@ -418,7 +431,11 @@ class TopicViewSet(ModelViewSet):
         queryset = Topic.objects.filter(
             community_id=profile.community_id
         ).select_related('community', 'author', 'author__neighbor_hub_profile')
-        
+
+        # 列表页排除草稿话题（草稿不展示在信息流中）
+        if self.action == 'list':
+            queryset = queryset.filter(is_draft=False)
+
         # 列表页才应用筛选条件（详情页直接按 pk 查询，不受列表筛选影响）
         if self.action == 'list':
             # filter 筛选
@@ -517,6 +534,10 @@ class TopicViewSet(ModelViewSet):
             ),
         )
         
+        # 详情页预取图片（避免 N+1）
+        if self.action == 'retrieve':
+            queryset = queryset.prefetch_related('images')
+
         # 预取评论数据（列表页和详情页策略不同）
         if self.action == 'list':
             # 列表页：预取热评（避免 N+1）
@@ -549,7 +570,7 @@ class TopicViewSet(ModelViewSet):
         return queryset
     
     def get_permissions(self):
-        if self.action in ('list', 'retrieve', 'comments'):
+        if self.action in ('list', 'retrieve', 'comments', 'images', 'draft', 'publish', 'delete_image'):
             return [IsAuthenticated()]
         if self.action == 'create':
             return [IsAuthenticated(), IsVerifiedUser()]
@@ -557,10 +578,251 @@ class TopicViewSet(ModelViewSet):
             return [IsAuthenticated(), IsCommitteeMember()]
         if self.action in ('like', 'subscribe', 'read'):
             return [IsAuthenticated(), IsVerifiedUser()]
+        # update, partial_update, destroy → 作者或业委会
         return [IsAuthenticated(), IsCommitteeOrAuthor()]
-    
+
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
+
+    def perform_destroy(self, instance):
+        """删除话题时级联删除所有关联图片（CASCADE + pre_delete 信号自动清理 OSS）"""
+        instance.delete()
+
+    @action(detail=False, methods=['post'])
+    def draft(self, request):
+        """获取或创建草稿话题
+
+        前端进入「创建话题」页面时调用：
+        - 如果当前用户在当前小区已有草稿，返回该草稿（含已上传图片）
+        - 如果没有草稿，创建一个新的草稿话题并返回
+
+        响应 (HTTP 200):
+        {
+          "id": "uuid",
+          "is_draft": true,
+          "title": "",
+          "content": "",
+          "category": "other",
+          "has_image": false,
+          "images": [],
+          "created_at": "...",
+          "updated_at": "..."
+        }
+        """
+        profile = getattr(request.user, 'neighbor_hub_profile', None)
+        if not profile or not profile.community_id:
+            return Response(
+                {'error': '请先加入小区'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 查找当前用户在当前小区的草稿
+        draft = Topic.objects.filter(
+            author=request.user,
+            community_id=profile.community_id,
+            is_draft=True
+        ).first()
+
+        if not draft:
+            # 创建新草稿
+            draft = Topic.objects.create(
+                author=request.user,
+                community_id=profile.community_id,
+                author_building=profile.building,
+                author_role=profile.role,
+                title='',
+                content='',
+                is_draft=True,
+            )
+
+        # 返回草稿信息 + 已有图片
+        images = TopicImage.objects.filter(topic=draft).order_by('sort_order', 'created_at')
+        return Response({
+            'id': str(draft.id),
+            'is_draft': True,
+            'title': draft.title,
+            'content': draft.content,
+            'category': draft.category,
+            'has_image': draft.has_image,
+            'poster_style': draft.poster_style,
+            'images': TopicImageSerializer(images, many=True, context={'request': request}).data,
+            'created_at': draft.created_at,
+            'updated_at': draft.updated_at,
+        })
+
+    @action(detail=True, methods=['post'])
+    def publish(self, request, pk=None):
+        """发布草稿话题
+
+        将草稿话题转为正式话题（is_draft=False），加入信息流。
+        校验：标题 ≥ 2字符，内容非空。
+
+        请求体（可选，如果前端已通过 PATCH 更新过则可不传）:
+        {
+          "title": "话题标题",
+          "content": "话题内容",
+          "category": "environment"
+        }
+
+        响应 (HTTP 200): 发布后的话题详情
+        """
+        topic = self.get_object()
+
+        # 仅话题作者可发布
+        if topic.author != request.user:
+            return Response(
+                {'error': '仅话题作者可发布'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if not topic.is_draft:
+            return Response(
+                {'error': '该话题不是草稿，无需发布'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 如果请求体中有 title/content，则更新
+        title = request.data.get('title', topic.title).strip()
+        content = request.data.get('content', topic.content).strip()
+        category = request.data.get('category', topic.category)
+
+        # 校验标题和内容
+        if len(title) < 2:
+            return Response(
+                {'title': '标题至少需要2个字符'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not content:
+            return Response(
+                {'content': '内容不能为空'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        topic.title = title
+        topic.content = content
+        topic.category = category
+        topic.is_draft = False
+        topic.save()
+
+        serializer = TopicDetailSerializer(topic, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get', 'post'])
+    def images(self, request, pk=None):
+        """获取图片列表 / 上传图片
+
+        GET  /topics/{id}/images/  → 获取话题的所有图片
+        POST /topics/{id}/images/  → 上传单张图片（multipart/form-data）
+
+        上传约束:
+        - 单张图片 ≤ 500KB
+        - 允许格式: jpg/jpeg/png/webp/gif
+        - 每话题最多 9 张图片
+        - 仅话题作者可上传
+        """
+        topic = self.get_object()
+
+        if request.method == 'GET':
+            images = TopicImage.objects.filter(topic=topic).order_by('sort_order', 'created_at')
+            serializer = TopicImageSerializer(images, many=True, context={'request': request})
+            return Response(serializer.data)
+
+        # POST 上传图片
+        # 权限校验：仅话题作者可上传
+        if topic.author != request.user:
+            return Response(
+                {'error': '仅话题作者可上传图片'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 获取上传的文件
+        file_obj = request.FILES.get('image')
+        if not file_obj:
+            return Response(
+                {'image': '请选择要上传的图片'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 校验图片数量
+        from django.conf import settings
+        current_count = TopicImage.objects.filter(topic=topic).count()
+        if current_count >= settings.MAX_IMAGES_PER_TOPIC:
+            return Response(
+                {'error': f'该话题已有 {current_count} 张图片，最多 {settings.MAX_IMAGES_PER_TOPIC} 张'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 校验图片大小和格式
+        from .services.oss_client import validate_image, upload_topic_image
+        ext, error = validate_image(file_obj)
+        if error:
+            return Response(
+                {'image': error},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 上传到 OSS
+        try:
+            result = upload_topic_image(str(topic.id), file_obj)
+        except Exception as e:
+            logger.error(f'图片上传失败: {e}')
+            return Response(
+                {'error': '图片上传失败，请稍后重试'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # 创建 DB 记录
+        image = TopicImage.objects.create(
+            topic=topic,
+            image_url=result['image_url'],
+            oss_key=result['oss_key'],
+            sort_order=current_count,
+        )
+
+        # 更新话题的 has_image 标记
+        if not topic.has_image:
+            topic.has_image = True
+            topic.save(update_fields=['has_image'])
+
+        serializer = TopicImageSerializer(image, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['delete'], url_path=r'images/(?P<image_id>[^/.]+)')
+    def delete_image(self, request, pk=None, image_id=None):
+        """删除单张图片
+
+        DELETE /topics/{id}/images/{image_id}/
+
+        同步删除 OSS 上的文件和 DB 记录。
+        仅话题作者可删除。
+        """
+        topic = self.get_object()
+
+        # 权限校验：仅话题作者可删除
+        if topic.author != request.user:
+            return Response(
+                {'error': '仅话题作者可删除图片'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            image = TopicImage.objects.get(id=image_id, topic=topic)
+        except TopicImage.DoesNotExist:
+            return Response(
+                {'error': '图片不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # TopicImage.delete() 会同步删除 OSS 文件
+        image.delete()
+
+        # 如果没有图片了，更新 has_image
+        remaining = TopicImage.objects.filter(topic=topic).count()
+        if remaining == 0 and topic.has_image:
+            topic.has_image = False
+            topic.save(update_fields=['has_image'])
+
+        return Response({'message': '图片已删除'}, status=status.HTTP_200_OK)
     
     @action(detail=True, methods=['post'])
     def like(self, request, pk=None):

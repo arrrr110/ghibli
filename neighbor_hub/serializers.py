@@ -4,6 +4,7 @@ from .models import (
     Community,
     NeighborHubProfile,
     Topic,
+    TopicImage,
     Comment,
     TopicLike,
     TopicSubscription,
@@ -171,6 +172,24 @@ class HotCommentSerializer(serializers.ModelSerializer):
         return profile.avatar if profile else ''
 
 
+class TopicImageSerializer(serializers.ModelSerializer):
+    """话题图片序列化器（用于图片列表展示）"""
+
+    class Meta:
+        model = TopicImage
+        fields = ['id', 'topic', 'image_url', 'sort_order', 'created_at']
+        read_only_fields = ['id', 'topic', 'image_url', 'sort_order', 'created_at']
+
+
+class TopicImageUploadSerializer(serializers.Serializer):
+    """图片上传表单序列化器（仅用于 DRF Browsable API 渲染文件上传表单）
+
+    实际上传逻辑在 views.TopicViewSet.images() 中手动处理，
+    此序列化器不参与数据校验，仅让 DRF Browsable API 显示文件选择框。
+    """
+    image = serializers.FileField(help_text="上传图片文件（≤500KB，支持 jpg/jpeg/png/webp/gif）")
+
+
 class TopicListSerializer(serializers.ModelSerializer):
     """话题列表序列化器（精简字段，用于首页卡片展示）"""
     author_nickname = serializers.SerializerMethodField()
@@ -181,7 +200,7 @@ class TopicListSerializer(serializers.ModelSerializer):
     subscriptions_count = serializers.IntegerField(read_only=True)
     readers_count = serializers.IntegerField(read_only=True)
     hot_comments = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Topic
         fields = [
@@ -197,17 +216,17 @@ class TopicListSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = fields
-    
+
     def get_author_nickname(self, obj):
         """从 NeighborHubProfile 获取昵称，回退到 username"""
         profile = getattr(obj.author, 'neighbor_hub_profile', None)
         if profile and profile.nickname:
             return profile.nickname
         return obj.author.username
-    
+
     def get_hot_comments(self, obj):
         """获取3条热门评论（按点赞数倒序）
-        
+
         数据来源：views 中 Prefetch 预取的 _hot_comments 属性
         如果没有预取（如详情页），则实时查询
         """
@@ -224,23 +243,25 @@ class TopicListSerializer(serializers.ModelSerializer):
 
 class TopicDetailSerializer(TopicListSerializer):
     """话题详情序列化器（包含完整内容、评论树和统计数据）
-    
+
     用于话题详情页，返回：
     - 话题完整内容
+    - 图片列表（images）
     - 阅读数（readers_count）、订阅数（subscriptions_count）、点赞数（likes_count）
     - 讨论区：顶级评论列表（含回复树）
     - 当前用户的互动状态（is_liked/is_subscribed/is_read/read_count）
     """
     comments = serializers.SerializerMethodField()
-    
+    images = serializers.SerializerMethodField()
+
     class Meta(TopicListSerializer.Meta):
         fields = TopicListSerializer.Meta.fields + [
-            'content', 'extra_data', 'comments',
+            'content', 'extra_data', 'comments', 'images',
         ]
-    
+
     def get_comments(self, obj):
         """获取顶级评论列表（含回复树）
-        
+
         数据来源：views 中 Prefetch 预取的 _detail_comments 属性
         每条评论包含 replies 嵌套（回复列表）
         """
@@ -259,18 +280,27 @@ class TopicDetailSerializer(TopicListSerializer):
             ).order_by('-created_at')
         return CommentSerializer(comments, many=True, context=self.context).data
 
+    def get_images(self, obj):
+        """获取话题图片列表（按 sort_order + created_at 排序）"""
+        # 优先使用预取数据（避免 N+1）
+        if hasattr(obj, '_prefetched_objects_cache') and 'images' in obj._prefetched_objects_cache:
+            images = obj._prefetched_objects_cache['images']
+        else:
+            images = obj.images.all()
+        return TopicImageSerializer(images, many=True, context=self.context).data
+
 
 class TopicCreateSerializer(serializers.ModelSerializer):
     """创建话题序列化器"""
-    
+
     class Meta:
         model = Topic
         fields = [
             'community', 'title', 'content', 'category',
-            'has_image', 'image_url', 'poster_style',
+            'has_image', 'poster_style',
             'extra_data'
         ]
-    
+
     def validate(self, attrs):
         request = self.context.get('request')
         if request:

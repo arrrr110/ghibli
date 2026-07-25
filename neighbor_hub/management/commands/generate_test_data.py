@@ -455,7 +455,6 @@ class Command(BaseCommand):
                 content=content,
                 category=category,
                 has_image=random.random() < 0.3,
-                image_url=f'https://picsum.photos/seed/{i}/400/300' if random.random() < 0.3 else '',
                 poster_style=random.choice([
                     Topic.PosterStyle.GRADIENT,
                     Topic.PosterStyle.EMOJI,

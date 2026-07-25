@@ -3,7 +3,7 @@
 > **Base URL**: `http://your-domain.com/api/neighbor-hub/`  
 > **认证方式**: JWT (Bearer Token)  
 > **数据格式**: JSON  
-> **最后更新时间**: 2026-07-19
+> **最后更新时间**: 2026-07-25
 
 ---
 
@@ -59,11 +59,16 @@ Authorization: Bearer <access_token>
 | 小区 | DELETE | `/communities/{id}/` | 已登录 + 业委会 | 删除小区 |
 | 小区 | GET | `/communities/{id}/members/` | 已登录 + 业委会 | 小区成员列表（支持筛选） |
 | 小区 | DELETE | `/communities/{id}/members/{user_id}/` | 已登录 + 业委会 | 删除小区成员 |
-| 话题 | GET | `/topics/` | 已登录 | 话题列表（自动按用户小区筛选 + 游标分页） |
-| 话题 | POST | `/topics/` | 已登录 + 已认证 | 创建话题 |
+| 话题 | GET | `/topics/` | 已登录 | 话题列表（自动按用户小区筛选 + 游标分页，排除草稿） |
+| 话题 | POST | `/topics/` | 已登录 + 已认证 | 创建话题（直接发布） |
+| 话题 | POST | `/topics/draft/` | 已登录 | 获取或创建草稿话题 |
 | 话题 | GET | `/topics/{id}/` | 已登录 | 话题详情 |
 | 话题 | PATCH | `/topics/{id}/` | 业委会或作者 | 更新话题 |
-| 话题 | DELETE | `/topics/{id}/` | 业委会或作者 | 删除话题 |
+| 话题 | DELETE | `/topics/{id}/` | 业委会或作者 | 删除话题（级联删除图片） |
+| 话题 | POST | `/topics/{id}/publish/` | 已登录 + 作者 | 发布草稿话题 |
+| 话题 | GET | `/topics/{id}/images/` | 已登录 | 获取话题图片列表 |
+| 话题 | POST | `/topics/{id}/images/` | 已登录 + 作者 | 上传图片（multipart，≤500KB） |
+| 话题 | DELETE | `/topics/{id}/images/{image_id}/` | 已登录 + 作者 | 删除单张图片 |
 | 话题 | POST | `/topics/{id}/like/` | 已登录 + 已认证 | 点赞/取消点赞 |
 | 话题 | POST | `/topics/{id}/subscribe/` | 已登录 + 已认证 | 订阅/取消订阅 |
 | 话题 | POST | `/topics/{id}/read/` | 已登录 + 已认证 | 标记已读 |
@@ -686,6 +691,8 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 **权限**: `IsAuthenticated` + `IsVerifiedUser`（需已认证）
 
+> **说明**: 此接口用于直接发布话题（无需草稿流程）。如需上传图片，请使用草稿流程：先调用 `POST /topics/draft/` 获取草稿 topic_id，上传图片后再调用 `POST /topics/{id}/publish/` 发布。
+
 **请求体**:
 ```json
 {
@@ -694,7 +701,6 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
   "content": "建议在小区增加一些绿植...",
   "category": "environment",
   "has_image": false,
-  "image_url": "",
   "poster_style": "minimal",
   "extra_data": {}
 }
@@ -707,7 +713,6 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 | content | string | ✅ | 话题内容 |
 | category | string | 否 | 分类，默认 `other` |
 | has_image | boolean | 否 | 是否有配图，默认 false |
-| image_url | string | 否 | 配图 URL |
 | poster_style | string | 否 | 海报样式，默认 `minimal` |
 | extra_data | object | 否 | 扩展数据 |
 
@@ -761,6 +766,15 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
   ],
   "content": "电梯维修通知全文内容...",
   "extra_data": {},
+  "images": [
+    {
+      "id": "uuid",
+      "topic": "uuid",
+      "image_url": "https://neighbor-hub.oss-cn-shanghai.aliyuncs.com/topics/xxx/yyy.jpg",
+      "sort_order": 0,
+      "created_at": "2026-07-19T10:00:00Z"
+    }
+  ],
   "comments": [
     {
       "id": "uuid",
@@ -809,6 +823,7 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 |------|------|------|
 | content | string | 话题完整内容 |
 | extra_data | object | 扩展数据 |
+| images | array | 话题图片列表（含 id、image_url、sort_order、created_at） |
 | likes_count | int | 点赞数 |
 | comments_count | int | 评论数 |
 | views_count | int | 浏览量（每次标记已读时递增） |
@@ -1007,6 +1022,219 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 ```
 
 **说明**: 再次调用可取消置顶。
+
+---
+
+### 20. 获取或创建草稿话题
+
+**POST** `/topics/draft/`
+
+**权限**: `IsAuthenticated`
+
+**功能说明**:
+- 前端进入「创建话题」页面时调用
+- 如果当前用户在当前小区已有草稿话题，返回该草稿（含已上传图片列表）
+- 如果没有草稿，创建一个新的草稿话题（`is_draft=True`）并返回
+- 草稿话题不展示在信息流列表中
+- 后端是唯一真相源，无需前端本地缓存
+
+**请求体**: 无
+
+**响应 (HTTP 200)**:
+```json
+{
+  "id": "uuid",
+  "is_draft": true,
+  "title": "",
+  "content": "",
+  "category": "other",
+  "has_image": false,
+  "poster_style": "minimal",
+  "images": [],
+  "created_at": "2026-07-25T10:00:00Z",
+  "updated_at": "2026-07-25T10:00:00Z"
+}
+```
+
+**响应字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | UUID | 草稿话题 ID（后续上传图片/发布时使用） |
+| is_draft | boolean | 始终为 true |
+| title | string | 草稿标题（初始为空） |
+| content | string | 草稿内容（初始为空） |
+| category | string | 分类（默认 other） |
+| has_image | boolean | 是否有图片 |
+| poster_style | string | 海报样式 |
+| images | array | 已上传图片列表（含 id、image_url、sort_order、created_at） |
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 400 | 用户未加入小区 | `{"error": "请先加入小区"}` |
+
+---
+
+### 21. 发布草稿话题
+
+**POST** `/topics/{id}/publish/`
+
+**权限**: `IsAuthenticated` + 话题作者本人
+
+**功能说明**:
+- 将草稿话题转为正式话题（`is_draft=False`），加入信息流
+- 校验标题（≥2字符）和内容（非空）
+- 可在请求体中传入 title/content/category（如果前端尚未通过 PATCH 更新过），也可不传使用草稿已有值
+
+**请求体**（可选）:
+```json
+{
+  "title": "话题标题",
+  "content": "话题内容",
+  "category": "environment"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| title | string | 否 | 话题标题（≥2字符，如未传则使用草稿已有值） |
+| content | string | 否 | 话题内容（非空，如未传则使用草稿已有值） |
+| category | string | 否 | 分类，如未传则使用草稿已有值 |
+
+**响应 (HTTP 200)**: 发布后的话题详情（同 [话题详情](#11-话题详情) 格式）
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 400 | 不是草稿话题 | `{"error": "该话题不是草稿，无需发布"}` |
+| 400 | 标题不足2字符 | `{"title": "标题至少需要2个字符"}` |
+| 400 | 内容为空 | `{"content": "内容不能为空"}` |
+| 403 | 非话题作者 | `{"error": "仅话题作者可发布"}` |
+
+---
+
+### 22. 获取话题图片列表
+
+**GET** `/topics/{id}/images/`
+
+**权限**: `IsAuthenticated`
+
+**响应 (HTTP 200)**:
+```json
+[
+  {
+    "id": "uuid",
+    "topic": "uuid",
+    "image_url": "https://neighbor-hub.oss-cn-shanghai.aliyuncs.com/topics/xxx/yyy.jpg",
+    "sort_order": 0,
+    "created_at": "2026-07-25T10:00:00Z"
+  }
+]
+```
+
+---
+
+### 23. 上传话题图片
+
+**POST** `/topics/{id}/images/`
+
+**权限**: `IsAuthenticated` + 话题作者本人
+
+> **域名说明**: 返回的 `image_url` 域名由后端 OSS 配置决定，前端直接使用该字段即可，不要硬编码域名。
+
+**Content-Type**: `multipart/form-data`
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| image | file | ✅ | 图片文件（multipart 上传） |
+
+**上传约束**:
+
+| 约束 | 规则 |
+|------|------|
+| 单张大小 | ≤ 500KB |
+| 允许格式 | jpg、jpeg、png、webp、gif |
+| 格式校验 | Pillow 读取文件头验证（防伪造扩展名） |
+| 每话题数量 | ≤ 9 张 |
+
+**响应 (HTTP 201)**:
+```json
+{
+  "id": "uuid",
+  "topic": "uuid",
+  "image_url": "https://neighbor-hub.oss-cn-shanghai.aliyuncs.com/topics/xxx/yyy.jpg",
+  "sort_order": 0,
+  "created_at": "2026-07-25T10:00:00Z"
+}
+```
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 400 | 未上传文件 | `{"image": "请选择要上传的图片"}` |
+| 400 | 图片超过 500KB | `{"image": "图片大小不能超过 500KB（当前 xxxKB）"}` |
+| 400 | 格式不支持 | `{"image": "不支持的图片格式：.bmp，仅允许 jpg, jpeg, png, webp, gif"}` |
+| 400 | 文件内容与扩展名不匹配 | `{"image": "文件内容与扩展名不匹配（文件实际格式: PNG）"}` |
+| 400 | 图片数量超过 9 张 | `{"error": "该话题已有 9 张图片，最多 9 张"}` |
+| 403 | 非话题作者 | `{"error": "仅话题作者可上传图片"}` |
+| 500 | OSS 上传失败 | `{"error": "图片上传失败，请稍后重试"}` |
+
+---
+
+### 24. 删除话题图片
+
+**DELETE** `/topics/{id}/images/{image_id}/`
+
+**权限**: `IsAuthenticated` + 话题作者本人
+
+**功能说明**:
+- 同步删除 OSS 上的文件和 DB 记录
+- 如果删除后该话题没有图片了，自动更新 `has_image=False`
+
+**响应 (HTTP 200)**:
+```json
+{
+  "message": "图片已删除"
+}
+```
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 403 | 非话题作者 | `{"error": "仅话题作者可删除图片"}` |
+| 404 | 图片不存在 | `{"error": "图片不存在"}` |
+
+---
+
+## 草稿话题与图片上传完整流程
+
+```
+1. 进入「创建话题」页面
+   → POST /topics/draft/  →  返回 topic_id + 已有图片列表
+
+2. 上传图片（可选，最多9张）
+   → POST /topics/{topic_id}/images/  (multipart, ≤500KB)
+   → 返回图片信息（id、image_url）
+
+3. 删除图片（可选）
+   → DELETE /topics/{topic_id}/images/{image_id}/
+
+4. 更新标题/内容/分类
+   → PATCH /topics/{topic_id}/  {"title": "...", "content": "...", "category": "..."}
+
+5. 发布话题
+   → POST /topics/{topic_id}/publish/  →  话题进入信息流
+
+6. 关闭页面不保留草稿
+   → DELETE /topics/{topic_id}/  →  级联删除草稿+图片（OSS+DB）
+```
 
 ---
 
@@ -1338,7 +1566,8 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 - GET/GET LIST: `HTTP 200`
 - POST (创建成功): `HTTP 201`
 - PATCH (更新成功): `HTTP 200`
-- DELETE (删除成功): `HTTP 204`
+- DELETE (删除话题): `HTTP 204`（无返回体）
+- DELETE (删除图片): `HTTP 200`（返回 `{"message": "图片已删除"}`）
 - POST (操作成功): `HTTP 200`
 
 ### 错误响应
@@ -1388,6 +1617,23 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 6. 参与互动: 点赞、评论、订阅
 ```
 
+**创建话题（含图片）流程:**
+```
+1. 进入「创建话题」页面
+   → POST /api/neighbor-hub/topics/draft/ → 获取草稿 topic_id + 已有图片
+2. 上传图片（可选，最多9张）
+   → POST /api/neighbor-hub/topics/{topic_id}/images/ (FormData, ≤500KB)
+   → 返回 { id, image_url, sort_order }
+3. 删除图片（可选）
+   → DELETE /api/neighbor-hub/topics/{topic_id}/images/{image_id}/
+4. 更新标题/内容/分类
+   → PATCH /api/neighbor-hub/topics/{topic_id}/ { title, content, category }
+5. 发布话题
+   → POST /api/neighbor-hub/topics/{topic_id}/publish/ → 话题进入信息流
+6. 关闭页面不保留草稿
+   → DELETE /api/neighbor-hub/topics/{topic_id}/ → 级联删除草稿+图片
+```
+
 **邀请注册流程（H5）:**
 ```
 1. 用户A（业主）分享链接: https://域名.com/join?inviter={user_a_id}
@@ -1404,6 +1650,70 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 ```javascript
 // 注意：邀请链接由前端生成，后端不参与
 // 格式: https://your-domain.com/join?inviter={user_id}
+
+// ==================== 话题相关 ====================
+
+// 获取或创建草稿话题（进入创建话题页面时调用）
+const getOrCreateDraft = async () => {
+  const { data } = await axios.post('/api/neighbor-hub/topics/draft/')
+  return data
+  // { id, is_draft: true, title, content, category, has_image, images: [...], ... }
+}
+
+// 更新草稿内容（标题/内容/分类）
+const updateDraft = async (topicId, { title, content, category }) => {
+  const { data } = await axios.patch(`/api/neighbor-hub/topics/${topicId}/`, {
+    title, content, category
+  })
+  return data
+}
+
+// 发布草稿话题
+const publishTopic = async (topicId, { title, content, category } = {}) => {
+  const { data } = await axios.post(`/api/neighbor-hub/topics/${topicId}/publish/`, {
+    title, content, category  // 可选，如已通过 PATCH 更新过可不传
+  })
+  return data
+}
+
+// 直接创建话题（无图片场景）
+const createTopic = async (topicData) => {
+  const { data } = await axios.post('/api/neighbor-hub/topics/', topicData)
+  return data
+}
+
+// ==================== 图片上传相关 ====================
+
+// 上传单张图片（multipart/form-data）
+const uploadTopicImage = async (topicId, file) => {
+  const formData = new FormData()
+  formData.append('image', file)
+  const { data } = await axios.post(
+    `/api/neighbor-hub/topics/${topicId}/images/`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+  return data
+  // { id, topic, image_url, sort_order, created_at }
+}
+
+// 获取话题图片列表
+const getTopicImages = async (topicId) => {
+  const { data } = await axios.get(`/api/neighbor-hub/topics/${topicId}/images/`)
+  return data
+  // [ { id, topic, image_url, sort_order, created_at }, ... ]
+}
+
+// 删除单张图片
+const deleteTopicImage = async (topicId, imageId) => {
+  const { data } = await axios.delete(
+    `/api/neighbor-hub/topics/${topicId}/images/${imageId}/`
+  )
+  return data
+  // { message: '图片已删除' }
+}
+
+// ==================== 其他接口 ====================
 
 // 获取小区列表
 const getCommunities = async () => {
@@ -1426,12 +1736,6 @@ const getMyInvitations = async () => {
   return data
 }
 
-// 创建话题
-const createTopic = async (topicData) => {
-  const { data } = await axios.post('/api/neighbor-hub/topics/', topicData)
-  return data
-}
-
 // 点赞话题
 const likeTopic = async (topicId) => {
   const { data } = await axios.post(`/api/neighbor-hub/topics/${topicId}/like/`)
@@ -1451,6 +1755,7 @@ const submitVerification = async (formData) => {
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v2.0.0 | 2026-07-25 | 图片上传功能：新增草稿话题机制（POST /topics/draft/、POST /topics/{id}/publish/）；新增图片上传/列表/删除接口（基于阿里云 OSS）；新增 TopicImage 模型；Topic 移除 image_url 字段，改为多图模型；列表页排除草稿话题；详情页返回 images 字段 |
 | v1.5.0 | 2026-07-23 | 话题详情接口优化：修复 500 错误（Coalesce+Subquery）；新增 `subscriptions_count`（订阅数）、`readers_count`（阅读数）字段；修复 `author_nickname`/`author_avatar` 从 NeighborHubProfile 获取（v1.4.0 重构遗留）；详情页返回评论树（含 replies 嵌套）；评论列表接口增加 replies 嵌套；`read` 接口递增 `views_count` 并返回；详情页不再受列表筛选参数影响 |
 | v1.4.0 | 2026-07-20 | 用户模型重构：User 只负责基础认证（phone/email/username+password）；nickname、avatar 移至 NeighborHubProfile（应用专属）；UserAppProfile 作为应用标记，业委会可删除应用标记禁用用户访问 |
 | v1.3.0 | 2026-07-20 | 邀请系统重构：移除邀请码机制，改为链接+二维码模式；前端生成邀请链接 `/join?inviter={user_id}`；后端只负责记录邀请关系 `POST /invitations/ {"inviter": "xxx"}`；过期时间调整为30天 |

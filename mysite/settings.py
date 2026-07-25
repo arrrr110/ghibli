@@ -256,4 +256,32 @@ ALIBABA_CLOUD_ACCESS_KEY_SECRET = os.getenv('ALIBABA_CLOUD_ACCESS_KEY_SECRET', '
 # 短信签名和模板（在阿里云控制台配置）
 ALIYUN_SMS_SIGN_NAME = os.getenv('ALIYUN_SMS_SIGN_NAME', '恒创联众')
 ALIYUN_SMS_TEMPLATE_CODE = os.getenv('ALIYUN_SMS_TEMPLATE_CODE', '100001')
-ALIYUN_SMS_SOURCE_IP = os.getenv('ALIYUN_SMS_SOURCE_IP', '2409:8a1e:70b1:ee70:9d10:45f3:7c89:6c2f')    
+ALIYUN_SMS_SOURCE_IP = os.getenv('ALIYUN_SMS_SOURCE_IP', '2409:8a1e:70b1:ee70:9d10:45f3:7c89:6c2f')
+
+
+# ============================================
+# 阿里云 OSS 配置（图片存储）
+# ============================================
+# 文档: https://help.aliyun.com/zh/oss/developer-reference/python-sdk-v1/
+# SDK: pip install oss2
+
+# AccessKey（从环境变量读取）
+OSS_ACCESS_KEY_ID = os.getenv('OSS_ACCESS_KEY_ID', '')
+OSS_SECRET_ACCESS_KEY = os.getenv('OSS_SECRET_ACCESS_KEY', '')
+
+# Bucket 名称
+OSS_BUCKET_NAME = os.getenv('OSS_BUCKET_NAME', '')
+
+# Endpoint：开发用外网，生产用内网（同区域免流量费）
+OSS_ENDPOINT = os.getenv('OSS_ENDPOINT', 'https://oss-cn-shanghai.aliyuncs.com')
+OSS_ENDPOINT_INTERNAL = os.getenv('OSS_ENDPOINT_INTERNAL', 'https://oss-cn-shanghai-internal.aliyuncs.com')
+# 根据 DEBUG 自动切换：开发用外网，生产用内网
+OSS_ACTIVE_ENDPOINT = OSS_ENDPOINT if DEBUG else OSS_ENDPOINT_INTERNAL
+
+# CNAME 自定义域名（图片访问 URL 前缀，格式：https://bucket-name.custom-domain.com）
+OSS_CUSTOM_DOMAIN = os.getenv('OSS_CUSTOM_DOMAIN', '')
+
+# 图片上传约束
+MAX_IMAGE_SIZE = 500 * 1024  # 500KB
+MAX_IMAGES_PER_TOPIC = 9
+ALLOWED_IMAGE_FORMATS = ['jpg', 'jpeg', 'png', 'webp', 'gif'] 

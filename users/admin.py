@@ -9,7 +9,6 @@ class UserAdmin(BaseUserAdmin):
     list_filter = ('is_active', 'is_staff', 'date_joined')
     search_fields = ('username', 'phone', 'email')
     ordering = ('-date_joined',)
-    
     fieldsets = BaseUserAdmin.fieldsets + (
         ('联系信息', {
             'fields': ('phone',),
@@ -19,9 +18,11 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(UserAppProfile)
 class UserAppProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'app_name', 'is_active', 'created_at')
+    list_display = ('user', 'app_name', 'is_active', 'created_at', 'id')
     list_filter = ('app_name', 'is_active')
     search_fields = ('user__username', 'user__phone')
+    readonly_fields = ('id','created_at')
+
 @admin.register(LoginRecord)
 class LoginRecordAdmin(admin.ModelAdmin):
     list_display = ('user', 'login_type', 'app_name', 'ip_address', 'created_at')

@@ -3,6 +3,7 @@ from .models import (
     Community,
     NeighborHubProfile,
     Topic,
+    TopicImage,
     Comment,
     TopicLike,
     TopicSubscription,
@@ -32,10 +33,19 @@ class NeighborHubProfileAdmin(admin.ModelAdmin):
 
 @admin.register(Topic)
 class TopicAdmin(admin.ModelAdmin):
-    list_display = ('title', 'community', 'author', 'category', 'status', 'is_pinned', 'created_at')
-    list_filter = ('category', 'status', 'is_pinned', 'community')
+    list_display = ('title', 'community', 'author', 'category', 'status', 'is_draft', 'is_pinned', 'created_at')
+    list_filter = ('category', 'status', 'is_draft', 'is_pinned', 'community')
     search_fields = ('title', 'content')
-    readonly_fields = ('likes_count', 'comments_count', 'views_count')
+    readonly_fields = ('id', 'likes_count', 'comments_count', 'views_count')
+
+
+@admin.register(TopicImage)
+class TopicImageAdmin(admin.ModelAdmin):
+    list_display = ('topic', 'image_url', 'sort_order', 'created_at')
+    list_filter = ('topic__community',)
+    search_fields = ('topic__title', 'oss_key')
+    ordering = ('-created_at',)
+    readonly_fields = ('id',)
 
 
 @admin.register(Comment)
