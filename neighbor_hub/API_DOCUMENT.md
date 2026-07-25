@@ -631,6 +631,7 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
       "title": "关于电梯维修的通知",
       "category": "notice",
       "has_image": false,
+      "cover_image": null,
       "poster_style": "minimal",
       "likes_count": 5,
       "comments_count": 3,
@@ -681,6 +682,7 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 | read_count | int | 当前用户的个人阅读次数（0=未读） |
 | hot_comments | array | 3 条热门评论（按点赞数倒序） |
 | has_image | boolean | 是否有配图 |
+| cover_image | string\|null | 封面图 URL（第一张图片），无图时为 null |
 | poster_style | string | 海报样式：gradient/emoji/minimal |
 
 ---

@@ -502,6 +502,12 @@ class TopicViewSet(ModelViewSet):
             is_read=Exists(
                 TopicReadRecord.objects.filter(topic=OuterRef('pk'), user=user)
             ),
+            # 封面图：第一张图片的 URL（按 sort_order + created_at 排序）
+            cover_image=Subquery(
+                TopicImage.objects.filter(
+                    topic=OuterRef('pk')
+                ).order_by('sort_order', 'created_at').values('image_url')[:1]
+            ),
             # 当前用户的个人阅读次数（0=未读）
             read_count=Coalesce(
                 Subquery(

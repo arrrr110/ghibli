@@ -200,6 +200,7 @@ class TopicListSerializer(serializers.ModelSerializer):
     subscriptions_count = serializers.IntegerField(read_only=True)
     readers_count = serializers.IntegerField(read_only=True)
     hot_comments = serializers.SerializerMethodField()
+    cover_image = serializers.CharField(read_only=True, allow_null=True, allow_blank=True)
 
     class Meta:
         model = Topic
@@ -207,7 +208,7 @@ class TopicListSerializer(serializers.ModelSerializer):
             'id',
             'author', 'author_nickname', 'author_building', 'author_role',
             'title', 'category',
-            'has_image', 'poster_style',
+            'has_image', 'cover_image', 'poster_style',
             'likes_count', 'comments_count', 'views_count',
             'subscriptions_count', 'readers_count',
             'is_pinned',
