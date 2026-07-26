@@ -695,7 +695,8 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
         }
       ],
       "created_at": "2026-07-19T10:00:00Z",
-      "updated_at": "2026-07-19T10:00:00Z"
+      "published_at": "2026-07-19T11:00:00Z",
+      "updated_at": null
     }
   ],
   "next": "cursor_string_for_next_page",
@@ -710,6 +711,9 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 | results | array | 话题列表 |
 | next | string\|null | 下一页游标（为 null 表示没有更多了） |
 | previous | string\|null | 上一页游标 |
+| published_at | string\|null | 首次发布时间（草稿时为 null） |
+| updated_at | string\|null | 最后编辑时间（从未编辑时为 null） |
+| created_at | string | 记录创建时间（草稿创建时间） |
 | likes_count | int | 点赞数 |
 | comments_count | int | 评论数 |
 | views_count | int | 浏览量（每次标记已读时递增） |
@@ -727,13 +731,14 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 ---
 
-### 10. 创建话题
+### 10b. 创建话题（直接发布，不推荐）
 
 **POST** `/topics/`
 
 **权限**: `IsAuthenticated` + `IsVerifiedUser`（需已认证）
 
-> **说明**: 此接口用于直接发布话题（无需草稿流程）。如需上传图片，请使用草稿流程：先调用 `POST /topics/draft/` 获取草稿 topic_id，上传图片后再调用 `POST /topics/{id}/publish/` 发布。
+> **⚠️ 已被草稿流程取代**：推荐使用 `POST /topics/draft/` + `POST /topics/{id}/publish/` 的草稿流程，以便上传图片。
+> 此接口仍然可用，但创建的话题没有图片上传能力。
 
 **请求体**:
 ```json
@@ -808,6 +813,7 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
   ],
   "content": "电梯维修通知全文内容...",
   "extra_data": {},
+  "is_draft": false,
   "images": [
     {
       "id": "uuid",
@@ -855,7 +861,8 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
     }
   ],
   "created_at": "2026-07-19T10:00:00Z",
-  "updated_at": "2026-07-19T10:00:00Z"
+  "published_at": "2026-07-19T11:00:00Z",
+  "updated_at": null
 }
 ```
 
@@ -865,7 +872,11 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 |------|------|------|
 | content | string | 话题完整内容 |
 | extra_data | object | 扩展数据 |
-| images | array | 话题图片列表（含 id、image_url、sort_order、created_at） |
+| is_draft | boolean | 是否为草稿（草稿不展示在信息流中） |
+| images | array | 话题图片列表（含 id、image_url、thumbnail_url、sort_order、created_at） |
+| published_at | string\|null | 首次发布时间（草稿时为 null） |
+| updated_at | string\|null | 最后编辑时间（从未编辑时为 null） |
+| created_at | string | 记录创建时间（草稿创建时间） |
 | likes_count | int | 点赞数 |
 | comments_count | int | 评论数 |
 | views_count | int | 浏览量（每次标记已读时递增） |
@@ -887,6 +898,8 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 **PATCH** `/topics/{id}/`
 
 **权限**: `IsAuthenticated` + `IsCommitteeOrAuthor` 或 `IsCommitteeMember`
+
+**说明**: 编辑话题内容时，`updated_at` 自动设为当前时间（`created_at` 和 `published_at` 不变）。
 
 **请求体**:
 ```json
@@ -1094,7 +1107,8 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
   "poster_style": "minimal",
   "images": [],
   "created_at": "2026-07-25T10:00:00Z",
-  "updated_at": "2026-07-25T10:00:00Z"
+  "published_at": null,
+  "updated_at": null
 }
 ```
 
@@ -1104,6 +1118,9 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 |------|------|------|
 | id | UUID | 草稿话题 ID（后续上传图片/发布时使用） |
 | is_draft | boolean | 始终为 true |
+| published_at | null | 草稿未发布，始终为 null |
+| updated_at | null | 草稿未编辑过，始终为 null |
+| created_at | string | 草稿创建时间 |
 | title | string | 草稿标题（初始为空） |
 | content | string | 草稿内容（初始为空） |
 | category | string | 分类（默认 other） |
@@ -1127,8 +1144,9 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 **功能说明**:
 - 将草稿话题转为正式话题（`is_draft=False`），加入信息流
+- 首次发布时设置 `published_at` 为当前时间
+- `created_at` 保持不变（草稿创建时间），`updated_at` 保持 null（未编辑）
 - 校验标题（≥2字符）和内容（非空）
-- 可在请求体中传入 title/content/category（如果前端尚未通过 PATCH 更新过），也可不传使用草稿已有值
 
 **请求体**（可选）:
 ```json

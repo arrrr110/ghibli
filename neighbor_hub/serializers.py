@@ -215,7 +215,7 @@ class TopicListSerializer(serializers.ModelSerializer):
             'is_pinned',
             'is_liked', 'is_subscribed', 'is_read', 'read_count',
             'hot_comments',
-            'created_at', 'updated_at',
+            'published_at', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
 

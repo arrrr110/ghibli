@@ -33,7 +33,7 @@ class NeighborHubProfileAdmin(admin.ModelAdmin):
 
 @admin.register(Topic)
 class TopicAdmin(admin.ModelAdmin):
-    list_display = ('title', 'community', 'author', 'category', 'status', 'is_draft', 'is_pinned', 'created_at')
+    list_display = ('title', 'community', 'author', 'category', 'status', 'is_draft', 'is_pinned', 'published_at', 'created_at')
     list_filter = ('category', 'status', 'is_draft', 'is_pinned', 'community')
     search_fields = ('title', 'content')
     readonly_fields = ('id', 'likes_count', 'comments_count', 'views_count')

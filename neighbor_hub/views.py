@@ -64,7 +64,7 @@ class TopicCursorPagination(CursorPagination):
     page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 50
-    ordering = ('-is_pinned', '-created_at')
+    ordering = ('-is_pinned', '-published_at')
 
 
 class CurrentUserProfileView(APIView):
@@ -634,6 +634,10 @@ class TopicViewSet(ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
 
+    def perform_update(self, serializer):
+        """编辑话题时手动设置 updated_at（auto_now 已移除）"""
+        serializer.save(updated_at=timezone.now())
+
     def perform_destroy(self, instance):
         """删除话题时级联删除所有关联图片（CASCADE + pre_delete 信号自动清理 OSS）"""
         instance.delete()
@@ -752,7 +756,12 @@ class TopicViewSet(ModelViewSet):
         topic.content = content
         topic.category = category
         topic.is_draft = False
-        topic.save()
+        # 首次发布时设置 published_at（业务时间），不动 updated_at
+        topic.published_at = timezone.now()
+        topic.save(update_fields=[
+            'title', 'content', 'category',
+            'is_draft', 'published_at',
+        ])
 
         serializer = TopicDetailSerializer(topic, context={'request': request})
         return Response(serializer.data)

@@ -158,6 +158,8 @@ class Topic(models.Model):
 
     # 草稿标记：草稿话题不展示在信息流中
     is_draft = models.BooleanField(default=False, verbose_name="草稿")
+    # 业务时间：首次发布时间（草稿创建时为 null，发布时赋值）
+    published_at = models.DateTimeField(null=True, blank=True, verbose_name="发布时间")
 
     # 统计数据
     likes_count = models.PositiveIntegerField(default=0)
@@ -169,11 +171,11 @@ class Topic(models.Model):
     extra_data = models.JSONField(default=dict, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    updated_at = models.DateTimeField(null=True, blank=True, verbose_name="最后编辑时间")
     
     class Meta:
         db_table = 'neighbor_hub_topics'
-        ordering = ['-is_pinned', '-created_at']
+        ordering = ['-is_pinned', '-published_at']
         verbose_name = '话题'
         verbose_name_plural = verbose_name
     
