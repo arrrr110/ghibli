@@ -59,6 +59,7 @@ Authorization: Bearer <access_token>
 | 小区 | DELETE | `/communities/{id}/` | 已登录 + 业委会 | 删除小区 |
 | 小区 | GET | `/communities/{id}/members/` | 已登录 + 业委会 | 小区成员列表（支持筛选） |
 | 小区 | DELETE | `/communities/{id}/members/{user_id}/` | 已登录 + 业委会 | 删除小区成员 |
+| 小区 | POST | `/communities/{id}/members/{user_id}/verify/` | 已登录 + 业委会 | 认证用户（通过审核） |
 | 小区 | POST | `/communities/{id}/members/{user_id}/unverify/` | 已登录 + 业委会 | 取消用户认证 |
 | 小区 | POST | `/communities/{id}/members/{user_id}/kick/` | 已登录 + 业委会 | 踢出用户（保留账号活跃） |
 | 话题 | GET | `/topics/` | 已登录 | 话题列表（自动按用户小区筛选 + 游标分页，排除草稿） |
@@ -581,6 +582,54 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 | 400 | 用户不属于本小区 | `{"error": "该用户不属于本小区"}` |
 | 403 | 无权限 | `{"error": "仅业委会成员可删除成员"}` |
 | 403 | 删除其他业委会 | `{"error": "不能删除其他业委会成员"}` |
+| 404 | 用户不存在 | `{"error": "用户不存在"}` |
+| 404 | 非活跃成员 | `{"error": "该用户不是小区活跃成员"}` |
+
+---
+
+### 9b. 认证用户（通过审核）
+
+**POST** `/communities/{id}/members/{user_id}/verify/`
+
+**权限**: `IsAuthenticated` + `IsCommitteeMember`（仅业委会可操作）
+
+**功能说明**:
+将未认证用户设为已认证状态，与 `unverify` 互为逆操作。
+
+**请求体**:
+```json
+{
+  "role": "owner",
+  "note": "审核通过，确认为业主"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| role | string | 否 | 认证身份：`owner`（业主，默认）或 `property`（物业） |
+| note | string | 否 | 审核备注（最大255字符） |
+
+**响应 (HTTP 200)**:
+```json
+{
+  "message": "已认证该成员"
+}
+```
+
+**说明**:
+- 认证后：`is_verified` 设为 `true`，`role` 设为指定身份，`verified_by` 设为当前操作者，`verified_at` 设为当前时间
+- 不能认证已认证用户（返回 400）
+- 不能认证其他业委会成员（返回 403）
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 400 | 用户已认证 | `{"error": "该用户已认证，无需重复认证"}` |
+| 400 | role 值非法 | `{"error": "role 只能是 owner 或 property"}` |
+| 400 | 用户不属于本小区 | `{"error": "该用户不属于本小区"}` |
+| 403 | 无权限 | `{"error": "仅业委会成员可操作"}` |
+| 403 | 认证业委会成员 | `{"error": "不能认证其他业委会成员"}` |
 | 404 | 用户不存在 | `{"error": "用户不存在"}` |
 | 404 | 非活跃成员 | `{"error": "该用户不是小区活跃成员"}` |
 
@@ -1600,6 +1649,7 @@ const likeTopic = async (topicId) => {
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v2.2.0 | 2026-07-27 | 新增 POST `/communities/{id}/members/{user_id}/verify/` 认证用户接口（与 unverify 互逆）；移除 VerificationRequest 和 AppNotification 模型及相关接口 |
 | v2.1.0 | 2026-07-25 | 用户头像上传接口（POST /users/me/avatar/）；话题列表/详情返回 author_avatar 字段；话题列表返回 cover_image 字段（封面图 URL）；删除重复的 patch 方法 |
 | v2.0.0 | 2026-07-25 | 图片上传功能：新增草稿话题机制（POST /topics/draft/、POST /topics/{id}/publish/）；新增图片上传/列表/删除接口（基于阿里云 OSS）；新增 TopicImage 模型；Topic 移除 image_url 字段，改为多图模型；列表页排除草稿话题；详情页返回 images 字段 |
 | v1.5.0 | 2026-07-23 | 话题详情接口优化：修复 500 错误（Coalesce+Subquery）；新增 `subscriptions_count`（订阅数）、`readers_count`（阅读数）字段；修复 `author_nickname`/`author_avatar` 从 NeighborHubProfile 获取（v1.4.0 重构遗留）；详情页返回评论树（含 replies 嵌套）；评论列表接口增加 replies 嵌套；`read` 接口递增 `views_count` 并返回；详情页不再受列表筛选参数影响 |

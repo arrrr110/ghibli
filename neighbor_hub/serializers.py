@@ -35,6 +35,7 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
     user_id = serializers.UUIDField(source='user.id', read_only=True)
     phone = serializers.SerializerMethodField()
     community_name = serializers.CharField(source='community.name', read_only=True)
+    invited_by_name = serializers.SerializerMethodField()
     
     class Meta:
         model = NeighborHubProfile
@@ -43,13 +44,13 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
             'community', 'community_name',
             'role', 'building', 'bio',
             'is_verified', 'verified_at', 'verification_note',
-            'invited_by',
+            'invited_by', 'invited_by_name',
             'is_active', 'last_login_at',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'is_verified', 'verified_at', 'verified_by',
-            'invited_by', 'last_login_at',
+            'invited_by', 'invited_by_name', 'last_login_at',
             'created_at', 'updated_at'
         ]
     
@@ -59,6 +60,15 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
         if phone and len(phone) == 11:
             return f"{phone[:3]}****{phone[-4:]}"
         return None
+    
+    def get_invited_by_name(self, obj):
+        """获取邀请人昵称（优先取 NeighborHubProfile.nickname，回退到 username）"""
+        if not obj.invited_by:
+            return None
+        inviter_profile = getattr(obj.invited_by, 'neighbor_hub_profile', None)
+        if inviter_profile and inviter_profile.nickname:
+            return inviter_profile.nickname
+        return obj.invited_by.username
     
     def update(self, instance, validated_data):
         """

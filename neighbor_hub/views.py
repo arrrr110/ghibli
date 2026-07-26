@@ -331,7 +331,9 @@ class CommunityViewSet(ModelViewSet):
         community = self.get_object()
         queryset = NeighborHubProfile.objects.filter(
             community=community, is_active=True
-        ).select_related('user')
+        ).exclude(
+            role='committee'  # 业委会成员由平台管理员审核，不出现在成员管理列表中
+        ).select_related('user', 'invited_by__neighbor_hub_profile')
         
         # 按认证状态筛选
         is_verified = request.query_params.get('is_verified')
@@ -419,6 +421,79 @@ class CommunityViewSet(ModelViewSet):
         target_profile.save()
         
         return Response({'message': '成员已从小区移除'}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path=r'members/(?P<user_id>[^/.]+)/verify')
+    def verify_member(self, request, pk=None, user_id=None):
+        """业委会认证用户（通过审核）
+
+        POST /api/neighbor-hub/communities/{id}/members/{user_id}/verify/
+
+        将未认证用户设为已认证状态，与 unverify 互为逆操作。
+
+        请求体:
+        {
+          "role": "owner",       // 认证身份：owner(业主) 或 property(物业)，默认 owner
+          "note": "审核备注"
+        }
+        """
+        # 仅业委会可操作
+        profile = getattr(request.user, 'neighbor_hub_profile', None)
+        if not profile or profile.role != 'committee':
+            return Response(
+                {'error': '仅业委会成员可操作'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        community = self.get_object()
+
+        # 查找目标用户
+        try:
+            target_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': '用户不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        target_profile = getattr(target_user, 'neighbor_hub_profile', None)
+        if not target_profile or not target_profile.is_active:
+            return Response(
+                {'error': '该用户不是小区活跃成员'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if target_profile.community_id != community.id:
+            return Response(
+                {'error': '该用户不属于本小区'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if target_profile.is_verified:
+            return Response(
+                {'error': '该用户已认证，无需重复认证'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 不能认证其他业委会成员
+        if target_profile.role == 'committee':
+            return Response(
+                {'error': '不能认证其他业委会成员'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 解析请求参数
+        role = request.data.get('role', 'owner')
+        if role not in ('owner', 'property'):
+            return Response(
+                {'error': 'role 只能是 owner 或 property'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        note = request.data.get('note', '')
+
+        # 认证用户
+        target_profile.verify(request.user, role=role, note=note)
+
+        return Response({'message': '已认证该成员'})
 
     @action(detail=True, methods=['post'], url_path=r'members/(?P<user_id>[^/.]+)/unverify')
     def unverify_member(self, request, pk=None, user_id=None):
