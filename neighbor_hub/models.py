@@ -107,24 +107,32 @@ class NeighborHubProfile(models.Model):
     def __str__(self):
         return f"{self.nickname or self.user} @ {self.community}"
     
-    def verify(self, committee_user, note=''):
-        """业委会认证用户"""
+    def verify(self, committee_user, role=None, note=''):
+        """业委会认证用户
+        
+        Args:
+            committee_user: 业委会用户
+            role: 认证后身份（owner/property），默认 owner
+            note: 审核备注
+        """
         self.is_verified = True
-        self.role = self.Role.OWNER
+        self.role = role or self.Role.OWNER
         self.verified_by = committee_user
         self.verified_at = timezone.now()
         self.verification_note = note
-        self.save()
+        self.save(update_fields=[
+            'is_verified', 'role', 'verified_by',
+            'verified_at', 'verification_note', 'updated_at',
+        ])
 
 
 class Topic(models.Model):
     """小区治理话题"""
     
     class Status(models.TextChoices):
-        ACTIVE = 'active', '进行中'
-        CLOSED = 'closed', '已结束'
-        PENDING = 'pending', '待审核'
-        REJECTED = 'rejected', '已拒绝'
+        ACTIVE = 'active', '正常'
+        CLOSED = 'closed', '已关闭'
+        HIDDEN = 'hidden', '已隐藏'
     
     class Category(models.TextChoices):
         FACILITY = 'facility', '设施改造'
@@ -361,79 +369,3 @@ class Invitation(models.Model):
             return True
         return False
 
-
-class VerificationRequest(models.Model):
-    """身份认证申请"""
-    
-    class Status(models.TextChoices):
-        PENDING = 'pending', '待审核'
-        APPROVED = 'approved', '已通过'
-        REJECTED = 'rejected', '已拒绝'
-    
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='verification_requests'
-    )
-    community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name='verification_requests')
-    name = models.CharField(max_length=50)
-    phone = models.CharField(max_length=20)
-    building = models.CharField(max_length=50)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='reviewed_requests'
-    )
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    review_note = models.CharField(max_length=255, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        db_table = 'neighbor_hub_verification_requests'
-        ordering = ['-created_at']
-        verbose_name = '认证申请'
-        verbose_name_plural = verbose_name
-    
-    def __str__(self):
-        return f"{self.name} - {self.get_status_display()}"
-    
-    def approve(self, committee_user, note=''):
-        """通过认证"""
-        self.status = self.Status.APPROVED
-        self.reviewed_by = committee_user
-        self.reviewed_at = timezone.now()
-        self.review_note = note
-        self.save()
-        # 更新用户 Profile
-        if hasattr(self.user, 'neighbor_hub_profile'):
-            self.user.neighbor_hub_profile.verify(committee_user, note)
-
-
-class AppNotification(models.Model):
-    """应用内通知"""
-    
-    class Type(models.TextChoices):
-        SYSTEM = 'system', '系统通知'
-        TOPIC_REPLY = 'topic_reply', '话题回复'
-        TOPIC_LIKE = 'topic_like', '话题点赞'
-        VERIFICATION = 'verification', '认证通知'
-        INVITATION = 'invitation', '邀请通知'
-    
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notifications')
-    type = models.CharField(max_length=20, choices=Type.choices)
-    title = models.CharField(max_length=100)
-    content = models.TextField()
-    related_id = models.CharField(max_length=50, blank=True)
-    is_read = models.BooleanField(default=False)
-    read_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    class Meta:
-        db_table = 'neighbor_hub_notifications'
-        ordering = ['-created_at']
-        verbose_name = '应用通知'
-        verbose_name_plural = verbose_name
-    
-    def __str__(self):
-        return f"{self.user}: {self.title}"

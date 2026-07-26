@@ -18,8 +18,6 @@ from neighbor_hub.models import (
     TopicLike,
     TopicSubscription,
     Invitation,
-    VerificationRequest,
-    AppNotification,
 )
 
 
@@ -138,15 +136,6 @@ COMMENT_TEMPLATES = [
     "辛苦了，感谢业委会的付出！",
 ]
 
-NOTIFICATION_TEMPLATES = [
-    ("系统通知", "欢迎加入NeighborHub社区，完善个人资料并与邻居互动。", "system"),
-    ("认证通过", "您的身份认证已通过，现在可以参与社区讨论啦。", "verification"),
-    ("话题回复", "有人回复了您的话题《{title}》，快去看看。", "topic_reply"),
-    ("话题点赞", "您的收到了 {count} 个赞。", "topic_like"),
-    ("邀请通知", "{inviter} 邀请您加入社区，请尽快注册。", "invitation"),
-    ("公告提醒", "社区有新公告《{title}》，请注意查看。", "system"),
-]
-
 
 class Command(BaseCommand):
     help = '生成测试数据（users + neighbor_hub）'
@@ -190,29 +179,21 @@ class Command(BaseCommand):
         invitations = self.create_invitations(users, communities)
         self.stdout.write(self.style.SUCCESS(f'  创建了 {len(invitations)} 条邀请记录'))
 
-        # 5. 创建认证申请
-        verification_requests = self.create_verification_requests(users, communities)
-        self.stdout.write(self.style.SUCCESS(f'  创建了 {len(verification_requests)} 条认证申请'))
-
-        # 6. 创建话题
+        # 5. 创建话题
         topics = self.create_topics(users, communities)
         self.stdout.write(self.style.SUCCESS(f'  创建了 {len(topics)} 个话题'))
 
-        # 7. 创建评论
+        # 6. 创建评论
         comments = self.create_comments(users, topics)
         self.stdout.write(self.style.SUCCESS(f'  创建了 {len(comments)} 条评论'))
 
-        # 8. 创建点赞
+        # 7. 创建点赞
         likes_count = self.create_likes(users, topics)
         self.stdout.write(self.style.SUCCESS(f'  创建了 {likes_count} 条点赞'))
 
-        # 9. 创建订阅
+        # 8. 创建订阅
         subs_count = self.create_subscriptions(users, topics)
         self.stdout.write(self.style.SUCCESS(f'  创建了 {subs_count} 条订阅'))
-
-        # 10. 创建通知
-        notifications = self.create_notifications(users, topics)
-        self.stdout.write(self.style.SUCCESS(f'  创建了 {len(notifications)} 条通知'))
 
         self.stdout.write(self.style.SUCCESS('测试数据生成完成！'))
 
@@ -221,12 +202,10 @@ class Command(BaseCommand):
         from users.models import UserAppProfile, LoginRecord
         
         # 顺序很重要，先清关联数据
-        AppNotification.objects.all().delete()
         TopicLike.objects.all().delete()
         TopicSubscription.objects.all().delete()
         Comment.objects.all().delete()
         Topic.objects.all().delete()
-        VerificationRequest.objects.all().delete()
         Invitation.objects.all().delete()
         NeighborHubProfile.objects.all().delete()
         Community.objects.all().delete()
@@ -373,62 +352,6 @@ class Command(BaseCommand):
         
         return invitations
 
-    def create_verification_requests(self, users, communities):
-        """创建认证申请"""
-        requests = []
-        committee_users = NeighborHubProfile.objects.filter(
-            role=NeighborHubProfile.Role.COMMITTEE
-        ).values_list('user', flat=True)
-        
-        for _ in range(30):
-            user = random.choice(users)
-            profile = NeighborHubProfile.objects.filter(user=user).first()
-            if not profile or not profile.community:
-                continue
-            
-            status = random.choices(
-                [VerificationRequest.Status.PENDING,
-                 VerificationRequest.Status.APPROVED,
-                 VerificationRequest.Status.REJECTED],
-                weights=[25, 60, 15]
-            )[0]
-            
-            reviewed_by = None
-            reviewed_at = None
-            review_note = ''
-            if status == VerificationRequest.Status.APPROVED:
-                reviewed_by_id = random.choice(list(committee_users)) if committee_users else None
-                if reviewed_by_id:
-                    reviewed_by = User.objects.get(id=reviewed_by_id)
-                reviewed_at = timezone.now() - timedelta(days=random.randint(0, 5))
-                review_note = random.choice([
-                    '已通过房本核验', '材料齐全，审核通过', '现场核实通过',
-                ])
-            elif status == VerificationRequest.Status.REJECTED:
-                reviewed_by_id = random.choice(list(committee_users)) if committee_users else None
-                if reviewed_by_id:
-                    reviewed_by = User.objects.get(id=reviewed_by_id)
-                reviewed_at = timezone.now() - timedelta(days=random.randint(0, 5))
-                review_note = random.choice([
-                    '房产证名字不符，请重新提交', '缺少物业缴费凭证',
-                    '照片模糊，请上传清晰的证件照',
-                ])
-            
-            req = VerificationRequest.objects.create(
-                user=user,
-                community=profile.community,
-                name=profile.nickname or user.username,
-                phone=user.phone or '',
-                building=profile.building,
-                status=status,
-                reviewed_by=reviewed_by,
-                reviewed_at=reviewed_at,
-                review_note=review_note,
-            )
-            requests.append(req)
-        
-        return requests
-
     def create_topics(self, users, communities):
         """创建话题"""
         topics = []
@@ -535,44 +458,3 @@ class Command(BaseCommand):
                 if created:
                     count += 1
         return count
-
-    def create_notifications(self, users, topics):
-        """创建应用内通知"""
-        notifications = []
-        
-        for _ in range(35):
-            user = random.choice(users)
-            notif_type = random.choice([t[2] for t in NOTIFICATION_TEMPLATES])
-            
-            title = ''
-            content = ''
-            
-            if notif_type == 'system':
-                title = random.choice(['系统通知', '公告提醒', '活动通知'])
-                content = '欢迎参与社区建设，共建美好生活。'
-            elif notif_type == 'verification':
-                title = '认证通过'
-                content = '您的身份认证已通过，享受更多社区权益。'
-            elif notif_type == 'topic_reply':
-                topic = random.choice(topics)
-                title = '话题回复'
-                content = f'有人回复了您关注的话题《{topic.title}》'
-            elif notif_type == 'topic_like':
-                title = '收到点赞'
-                content = f'您的内容获得了 {random.randint(1, 20)} 个赞'
-            elif notif_type == 'invitation':
-                title = '社区邀请'
-                content = '有邻居邀请您加入社区，快来看看吧'
-            
-            notif = AppNotification.objects.create(
-                user=user,
-                type=notif_type,
-                title=title,
-                content=content,
-                related_id=str(random.choice(topics).id) if topics and random.random() < 0.5 else '',
-                is_read=random.random() < 0.4,
-                read_at=timezone.now() - timedelta(hours=random.randint(1, 24)) if random.random() < 0.4 else None,
-            )
-            notifications.append(notif)
-        
-        return notifications

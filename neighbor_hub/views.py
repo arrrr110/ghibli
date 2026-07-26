@@ -25,8 +25,6 @@ from .models import (
     TopicSubscription,
     TopicReadRecord,
     Invitation,
-    VerificationRequest,
-    AppNotification,
 )
 from users.models import UserAppProfile, User
 from .permissions import (
@@ -46,9 +44,6 @@ from .serializers import (
     CommentSerializer,
     InvitationSerializer,
     InvitationCreateSerializer,
-    VerificationRequestSerializer,
-    VerificationRequestReviewSerializer,
-    AppNotificationSerializer,
     SwitchCommunitySerializer,
 )
 
@@ -425,6 +420,140 @@ class CommunityViewSet(ModelViewSet):
         
         return Response({'message': '成员已从小区移除'}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['post'], url_path=r'members/(?P<user_id>[^/.]+)/unverify')
+    def unverify_member(self, request, pk=None, user_id=None):
+        """业委会取消用户认证（改回待审核状态）
+        
+        POST /api/neighbor-hub/communities/{id}/members/{user_id}/unverify/
+        
+        将已认证用户改回未认证状态，用户需重新提交认证申请。
+        """
+        community = self.get_object()
+        
+        # 查找目标用户
+        try:
+            target_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': '用户不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        target_profile = getattr(target_user, 'neighbor_hub_profile', None)
+        if not target_profile or not target_profile.is_active:
+            return Response(
+                {'error': '该用户不是小区活跃成员'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if target_profile.community_id != community.id:
+            return Response(
+                {'error': '该用户不属于本小区'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not target_profile.is_verified:
+            return Response(
+                {'error': '该用户未认证，无需取消'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 不能取消其他业委会成员的认证
+        if target_profile.role == 'committee':
+            return Response(
+                {'error': '不能取消其他业委会成员的认证'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # 取消认证
+        target_profile.is_verified = False
+        target_profile.role = NeighborHubProfile.Role.OWNER
+        target_profile.verified_by = None
+        target_profile.verified_at = None
+        target_profile.verification_note = ''
+        target_profile.save(update_fields=[
+            'is_verified', 'role', 'verified_by',
+            'verified_at', 'verification_note',
+        ])
+        
+        return Response({'message': '已取消用户认证'})
+
+    @action(detail=True, methods=['post'], url_path=r'members/(?P<user_id>[^/.]+)/kick')
+    def kick_member(self, request, pk=None, user_id=None):
+        """业委会踢出用户（保留账号活跃，可加入其他小区）
+        
+        POST /api/neighbor-hub/communities/{id}/members/{user_id}/kick/
+        
+        与 DELETE（软删除）的区别：
+        - kick：community=null, is_verified=false, role=owner, is_active=true
+          → 用户可重新选择其他小区并提交认证申请
+        - delete：is_active=false, nickname='已注销用户'
+          → 用户账号被软删除，无法再使用
+        
+        用于审核人员拒绝待审核用户。
+        """
+        # 仅业委会可操作
+        profile = getattr(request.user, 'neighbor_hub_profile', None)
+        if not profile or profile.role != 'committee':
+            return Response(
+                {'error': '仅业委会成员可操作'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        community = self.get_object()
+        
+        # 不能踢自己
+        if str(user_id) == str(request.user.id):
+            return Response(
+                {'error': '不能踢出自己'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 查找目标用户
+        try:
+            target_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': '用户不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        target_profile = getattr(target_user, 'neighbor_hub_profile', None)
+        if not target_profile or not target_profile.is_active:
+            return Response(
+                {'error': '该用户不是小区活跃成员'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if target_profile.community_id != community.id:
+            return Response(
+                {'error': '该用户不属于本小区'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 不能踢其他业委会成员
+        if target_profile.role == 'committee':
+            return Response(
+                {'error': '不能踢出其他业委会成员'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # 踢出：保留账号活跃，清除小区关联和认证状态
+        target_profile.community = None
+        target_profile.is_verified = False
+        target_profile.role = NeighborHubProfile.Role.OWNER
+        target_profile.verified_by = None
+        target_profile.verified_at = None
+        target_profile.verification_note = ''
+        target_profile.building = ''
+        target_profile.save(update_fields=[
+            'community', 'is_verified', 'role',
+            'verified_by', 'verified_at', 'verification_note',
+            'building',
+        ])
+        
+        return Response({'message': f'已将用户移出{community.name}'})
+
 
 class TopicViewSet(ModelViewSet):
     """
@@ -476,9 +605,25 @@ class TopicViewSet(ModelViewSet):
             community_id=profile.community_id
         ).select_related('community', 'author', 'author__neighbor_hub_profile')
 
-        # 列表页排除草稿话题（草稿不展示在信息流中）
+        # 列表页：排除草稿，按 status 参数过滤
         if self.action == 'list':
             queryset = queryset.filter(is_draft=False)
+            
+            # status 参数：默认 active，业委会可查 hidden/closed/all
+            status_param = self.request.query_params.get('status', 'active')
+            
+            if status_param == 'active':
+                queryset = queryset.filter(status=Topic.Status.ACTIVE)
+            else:
+                # status=all|hidden|closed → 仅业委会可用
+                if not profile or profile.role != 'committee':
+                    raise PermissionDenied('仅业委会可查看非正常状态的话题')
+                
+                if status_param == 'hidden':
+                    queryset = queryset.filter(status=Topic.Status.HIDDEN)
+                elif status_param == 'closed':
+                    queryset = queryset.filter(status=Topic.Status.CLOSED)
+                # status=all → 不加额外过滤，返回所有状态
 
         # 列表页才应用筛选条件（详情页直接按 pk 查询，不受列表筛选影响）
         if self.action == 'list':
@@ -624,7 +769,7 @@ class TopicViewSet(ModelViewSet):
             return [IsAuthenticated()]
         if self.action == 'create':
             return [IsAuthenticated(), IsVerifiedUser()]
-        if self.action == 'pin':
+        if self.action in ('pin', 'hide', 'close'):
             return [IsAuthenticated(), IsCommitteeMember()]
         if self.action in ('like', 'subscribe', 'read'):
             return [IsAuthenticated(), IsVerifiedUser()]
@@ -635,11 +780,22 @@ class TopicViewSet(ModelViewSet):
         serializer.save(author=self.request.user)
 
     def perform_update(self, serializer):
-        """编辑话题时手动设置 updated_at（auto_now 已移除）"""
+        """编辑话题时手动设置 updated_at（auto_now 已移除）
+        
+        已关闭/已隐藏的话题不可编辑。
+        """
+        topic = serializer.instance
+        if topic.status != Topic.Status.ACTIVE:
+            raise ValidationError({'error': '该话题已关闭或已隐藏，不可编辑'})
         serializer.save(updated_at=timezone.now())
 
     def perform_destroy(self, instance):
-        """删除话题时级联删除所有关联图片（CASCADE + pre_delete 信号自动清理 OSS）"""
+        """删除话题时级联删除所有关联图片（CASCADE + pre_delete 信号自动清理 OSS）
+        
+        已关闭/已隐藏的话题不可删除。
+        """
+        if instance.status != Topic.Status.ACTIVE:
+            raise ValidationError({'error': '该话题已关闭或已隐藏，不可删除'})
         instance.delete()
 
     @action(detail=False, methods=['post'])
@@ -958,6 +1114,12 @@ class TopicViewSet(ModelViewSet):
             serializer = CommentSerializer(comments, many=True, context={'request': request})
             return Response(serializer.data)
         # POST 添加评论
+        # 已关闭/已隐藏的话题不可评论
+        if topic.status != Topic.Status.ACTIVE:
+            return Response(
+                {'error': '该话题已关闭或已隐藏，不可评论'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         content = request.data.get('content', '').strip()
         if not content:
             raise ValidationError({'content': '评论内容不能为空'})
@@ -979,26 +1141,44 @@ class TopicViewSet(ModelViewSet):
         )
         topic.comments_count += 1
         topic.save(update_fields=['comments_count'])
-        # 通知被回复者
-        if parent and parent.author != request.user:
-            nickname = profile.nickname if profile else None
-            AppNotification.objects.create(
-                user=parent.author,
-                type=AppNotification.Type.TOPIC_REPLY,
-                title='有人回复了你的评论',
-                content=f'{nickname or request.user.username} 回复了你',
-                related_id=str(topic.id)
-            )
         serializer = CommentSerializer(comment, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['post'])
     def pin(self, request, pk=None):
-        """置顶话题"""
+        """置顶/取消置顶话题"""
         topic = self.get_object()
         topic.is_pinned = not topic.is_pinned
         topic.save(update_fields=['is_pinned'])
         return Response({'is_pinned': topic.is_pinned})
+    
+    @action(detail=True, methods=['post'])
+    def hide(self, request, pk=None):
+        """隐藏/取消隐藏话题
+        
+        隐藏后话题不再出现在信息流列表中。
+        """
+        topic = self.get_object()
+        if topic.status == Topic.Status.HIDDEN:
+            topic.status = Topic.Status.ACTIVE
+        else:
+            topic.status = Topic.Status.HIDDEN
+        topic.save(update_fields=['status'])
+        return Response({'status': topic.status})
+    
+    @action(detail=True, methods=['post'])
+    def close(self, request, pk=None):
+        """关闭/重新开启话题
+        
+        关闭后任何人不可编辑、删除、评论。
+        """
+        topic = self.get_object()
+        if topic.status == Topic.Status.CLOSED:
+            topic.status = Topic.Status.ACTIVE
+        else:
+            topic.status = Topic.Status.CLOSED
+        topic.save(update_fields=['status'])
+        return Response({'status': topic.status})
 
 
 class InvitationViewSet(ModelViewSet):
@@ -1069,109 +1249,3 @@ class InvitationViewSet(ModelViewSet):
         response_serializer = InvitationSerializer(invitation, context={'request': request})
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
-
-class VerificationRequestViewSet(ModelViewSet):
-    """
-    身份认证申请
-    POST   /api/neighbor-hub/verification-requests/           提交申请
-    GET    /api/neighbor-hub/verification-requests/           查看我的申请
-    GET    /api/neighbor-hub/verification-requests/pending/   待审核列表（业委会）
-    POST   /api/neighbor-hub/verification-requests/{id}/review/  审核（业委会）
-    """
-    serializer_class = VerificationRequestSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        user = self.request.user
-        profile = getattr(user, 'neighbor_hub_profile', None)
-        if self.action == 'pending':
-            # 业委会查看其小区的待审核列表
-            if profile and profile.role == 'committee':
-                return VerificationRequest.objects.filter(
-                    status=VerificationRequest.Status.PENDING,
-                    community=profile.community
-                ).select_related('user', 'community')
-            return VerificationRequest.objects.none()
-        return VerificationRequest.objects.filter(user=user).select_related('community')
-    
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-    
-    @action(detail=False, methods=['get'])
-    def pending(self, request):
-        """待审核列表"""
-        queryset = self.get_queryset()
-        serializer = VerificationRequestSerializer(queryset, many=True, context={'request': request})
-        return Response(serializer.data)
-    
-    @action(detail=True, methods=['post'])
-    def review(self, request, pk=None):
-        """审核认证申请"""
-        verification_request = self.get_object()
-        serializer = VerificationRequestReviewSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        action = serializer.validated_data['action']
-        note = serializer.validated_data.get('note', '')
-        if action == 'approve':
-            verification_request.approve(request.user, note)
-            # 发送通知给申请者
-            AppNotification.objects.create(
-                user=verification_request.user,
-                type=AppNotification.Type.VERIFICATION,
-                title='身份认证已通过',
-                content=f'恭喜！您已成为业主',
-                related_id=str(verification_request.id)
-            )
-        else:
-            verification_request.status = VerificationRequest.Status.REJECTED
-            verification_request.reviewed_by = request.user
-            verification_request.reviewed_at = timezone.now()
-            verification_request.review_note = note
-            verification_request.save()
-            AppNotification.objects.create(
-                user=verification_request.user,
-                type=AppNotification.Type.VERIFICATION,
-                title='身份认证被拒绝',
-                content=f'原因：{note or "不符合要求"}',
-                related_id=str(verification_request.id)
-            )
-        return Response({'status': verification_request.status})
-
-
-class NotificationViewSet(ModelViewSet):
-    """
-    通知管理
-    GET  /api/neighbor-hub/notifications/                 通知列表
-    GET  /api/neighbor-hub/notifications/unread-count/    未读数量
-    POST /api/neighbor-hub/notifications/{id}/read/       标记已读
-    POST /api/neighbor-hub/notifications/read-all/        全部已读
-    """
-    serializer_class = AppNotificationSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        return AppNotification.objects.filter(user=self.request.user)
-    
-    @action(detail=False, methods=['get'])
-    def unread_count(self, request):
-        """获取未读通知数量"""
-        count = AppNotification.objects.filter(user=request.user, is_read=False).count()
-        return Response({'unread_count': count})
-    
-    @action(detail=True, methods=['post'])
-    def read(self, request, pk=None):
-        """标记单条通知为已读"""
-        notification = self.get_object()
-        if not notification.is_read:
-            notification.is_read = True
-            notification.read_at = timezone.now()
-            notification.save(update_fields=['is_read', 'read_at'])
-        return Response({'read': True})
-    
-    @action(detail=False, methods=['post'])
-    def read_all(self, request):
-        """全部标记为已读"""
-        AppNotification.objects.filter(user=request.user, is_read=False).update(
-            is_read=True, read_at=timezone.now()
-        )
-        return Response({'message': '已全部标记为已读'})

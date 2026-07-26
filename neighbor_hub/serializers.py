@@ -10,8 +10,6 @@ from .models import (
     TopicSubscription,
     TopicReadRecord,
     Invitation,
-    VerificationRequest,
-    AppNotification,
 )
 
 
@@ -213,6 +211,7 @@ class TopicListSerializer(serializers.ModelSerializer):
             'likes_count', 'comments_count', 'views_count',
             'subscriptions_count', 'readers_count',
             'is_pinned',
+            'status',
             'is_liked', 'is_subscribed', 'is_read', 'read_count',
             'hot_comments',
             'published_at', 'created_at', 'updated_at',
@@ -361,62 +360,6 @@ class InvitationSerializer(serializers.ModelSerializer):
         if profile and profile.nickname:
             return profile.nickname
         return obj.inviter.username
-
-
-class VerificationRequestSerializer(serializers.ModelSerializer):
-    """认证申请序列化器"""
-    user_nickname = serializers.SerializerMethodField()
-    community_name = serializers.CharField(source='community.name', read_only=True)
-    reviewed_by_nickname = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = VerificationRequest
-        fields = [
-            'id', 'user', 'user_nickname',
-            'community', 'community_name',
-            'name', 'phone', 'building',
-            'status', 'reviewed_by', 'reviewed_by_nickname',
-            'reviewed_at', 'review_note',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = [
-            'id', 'user', 'status',
-            'reviewed_by', 'reviewed_at', 'review_note',
-            'created_at', 'updated_at'
-        ]
-    
-    def get_user_nickname(self, obj):
-        profile = getattr(obj.user, 'neighbor_hub_profile', None)
-        if profile and profile.nickname:
-            return profile.nickname
-        return obj.user.username
-    
-    def get_reviewed_by_nickname(self, obj):
-        if not obj.reviewed_by:
-            return None
-        profile = getattr(obj.reviewed_by, 'neighbor_hub_profile', None)
-        if profile and profile.nickname:
-            return profile.nickname
-        return obj.reviewed_by.username
-
-
-class VerificationRequestReviewSerializer(serializers.Serializer):
-    """认证审核序列化器"""
-    action = serializers.ChoiceField(choices=['approve', 'reject'])
-    note = serializers.CharField(required=False, allow_blank=True, max_length=255)
-
-
-class AppNotificationSerializer(serializers.ModelSerializer):
-    """通知序列化器"""
-    
-    class Meta:
-        model = AppNotification
-        fields = [
-            'id', 'type', 'title', 'content',
-            'related_id', 'is_read', 'read_at',
-            'created_at'
-        ]
-        read_only_fields = ['id', 'read_at', 'created_at']
 
 
 class SwitchCommunitySerializer(serializers.Serializer):

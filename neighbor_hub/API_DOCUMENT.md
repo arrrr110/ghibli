@@ -59,6 +59,8 @@ Authorization: Bearer <access_token>
 | 小区 | DELETE | `/communities/{id}/` | 已登录 + 业委会 | 删除小区 |
 | 小区 | GET | `/communities/{id}/members/` | 已登录 + 业委会 | 小区成员列表（支持筛选） |
 | 小区 | DELETE | `/communities/{id}/members/{user_id}/` | 已登录 + 业委会 | 删除小区成员 |
+| 小区 | POST | `/communities/{id}/members/{user_id}/unverify/` | 已登录 + 业委会 | 取消用户认证 |
+| 小区 | POST | `/communities/{id}/members/{user_id}/kick/` | 已登录 + 业委会 | 踢出用户（保留账号活跃） |
 | 话题 | GET | `/topics/` | 已登录 | 话题列表（自动按用户小区筛选 + 游标分页，排除草稿） |
 | 话题 | POST | `/topics/` | 已登录 + 已认证 | 创建话题（直接发布） |
 | 话题 | POST | `/topics/draft/` | 已登录 | 获取或创建草稿话题 |
@@ -78,17 +80,6 @@ Authorization: Bearer <access_token>
 | 邀请 | GET | `/invitations/` | 已登录 | 我的邀请记录 |
 | 邀请 | POST | `/invitations/` | 已登录 | 记录邀请关系（传入 inviter user_id） |
 | 邀请 | DELETE | `/invitations/{id}/` | 已登录 | 删除邀请记录 |
-| 认证申请 | POST | `/verification-requests/` | 已登录 | 提交认证申请 |
-| 认证申请 | GET | `/verification-requests/` | 已登录 | 我的认证申请列表 |
-| 认证申请 | GET | `/verification-requests/{id}/` | 已登录 | 认证申请详情 |
-| 认证申请 | GET | `/verification-requests/pending/` | 已登录 + 业委会 | 待审核列表 |
-| 认证申请 | POST | `/verification-requests/{id}/review/` | 已登录 + 业委会 | 审核认证申请 |
-| 通知 | GET | `/notifications/` | 已登录 | 通知列表 |
-| 通知 | GET | `/notifications/{id}/` | 已登录 | 通知详情 |
-| 通知 | DELETE | `/notifications/{id}/` | 已登录 | 删除通知 |
-| 通知 | GET | `/notifications/unread-count/` | 已登录 | 未读通知数量 |
-| 通知 | POST | `/notifications/{id}/read/` | 已登录 | 标记单条已读 |
-| 通知 | POST | `/notifications/read-all/` | 已登录 | 全部标记已读 |
 
 ---
 
@@ -614,6 +605,7 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 | filter | string | 否 | 行为筛选：`all`（默认）/ `unread` / `read` / `liked` / `subscribed` |
 | category | string | 否 | 按分类筛选（见下方可选值），与 `filter` 可组合使用 |
 | search | string | 否 | 搜索标题/内容（模糊匹配） |
+| status | string | 否 | 状态筛选：`active`（默认）/ `hidden` / `closed` / `all`，后三个仅业委会可用 |
 | cursor | string | 否 | 游标分页标记（首次请求不传，加载下一页时传入上次返回的 `next` 值） |
 | page_size | int | 否 | 每页数量，默认 10，最大 50 |
 
@@ -626,6 +618,17 @@ DELETE /communities/550e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-4
 | `read` | 仅已读话题 |
 | `liked` | 我点赞过的话题 |
 | `subscribed` | 我收藏的话题 |
+
+**status 可选值**（业委会管理页用）:
+
+| 值 | 说明 | 权限 |
+|----|------|------|
+| `active` | 默认，仅正常话题 | 所有用户 |
+| `hidden` | 仅隐藏话题 | 仅业委会 |
+| `closed` | 仅关闭话题 | 仅业委会 |
+| `all` | 所有状态话题 | 仅业委会 |
+
+> 非业委会用户传 `status=hidden/closed/all` 会返回 403。
 
 **category 可选值**:
 
@@ -1394,231 +1397,6 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 ---
 
-## 五、身份认证接口
-
----
-
-### 23. 提交认证申请
-
-**POST** `/verification-requests/`
-
-**权限**: `IsAuthenticated`
-
-**请求体**:
-```json
-{
-  "community": "uuid",
-  "name": "张三",
-  "phone": "13800138000",
-  "building": "1号楼501"
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| community | UUID | ✅ | 申请认证的小区 |
-| name | string | ✅ | 真实姓名 |
-| phone | string | ✅ | 联系电话 |
-| building | string | ✅ | 楼号房号 |
-
-**响应 (HTTP 201)**:
-```json
-{
-  "id": "uuid",
-  "user": "uuid",
-  "user_nickname": "用户昵称",
-  "community": "uuid",
-  "community_name": "阳光花园",
-  "name": "张三",
-  "phone": "13800138000",
-  "building": "1号楼501",
-  "status": "pending",
-  "reviewed_by": null,
-  "reviewed_by_nickname": null,
-  "reviewed_at": null,
-  "review_note": "",
-  "created_at": "2026-07-19T10:00:00Z",
-  "updated_at": "2026-07-19T10:00:00Z"
-}
-```
-
-**status 可选值**:
-
-| 值 | 名称 |
-|----|------|
-| `pending` | 待审核 |
-| `approved` | 已通过 |
-| `rejected` | 已拒绝 |
-
----
-
-### 24. 我的认证申请列表
-
-**GET** `/verification-requests/`
-
-**权限**: `IsAuthenticated`
-
-**响应 (HTTP 200)**: 认证申请对象数组
-
----
-
-### 25. 认证申请详情
-
-**GET** `/verification-requests/{id}/`
-
-**权限**: `IsAuthenticated`
-
-**响应 (HTTP 200)**: 认证申请详情
-
----
-
-### 26. 待审核列表（业委会）
-
-**GET** `/verification-requests/pending/`
-
-**权限**: `IsAuthenticated` + `IsCommitteeMember`
-
-**响应 (HTTP 200)**: 当前用户所在小区的待审核申请列表
-
-**说明**: 非业委会成员返回空列表。
-
----
-
-### 27. 审核认证申请
-
-**POST** `/verification-requests/{id}/review/`
-
-**权限**: `IsAuthenticated` + `IsCommitteeMember`
-
-**请求体**:
-```json
-{
-  "action": "approve",
-  "note": "审核通过，确认为业主"
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| action | string | ✅ | `approve`（通过）或 `reject`（拒绝） |
-| note | string | 否 | 审核备注（最大255字符） |
-
-**响应 (HTTP 200)**:
-```json
-{
-  "status": "approved"
-}
-```
-
-**说明**:
-- 通过后：用户 Profile 的 `is_verified` 设为 `true`，`role` 设为 `owner`，发送通过通知
-- 拒绝后：记录拒绝原因，发送拒绝通知
-
----
-
-## 六、通知接口
-
----
-
-### 28. 通知列表
-
-**GET** `/notifications/`
-
-**权限**: `IsAuthenticated`
-
-**响应 (HTTP 200)**:
-```json
-[
-  {
-    "id": "uuid",
-    "type": "verification",
-    "title": "身份认证已通过",
-    "content": "恭喜！您已成为业主",
-    "related_id": "uuid",
-    "is_read": false,
-    "read_at": null,
-    "created_at": "2026-07-19T10:00:00Z"
-  }
-]
-```
-
-**type 可选值**:
-
-| 值 | 名称 |
-|----|------|
-| `system` | 系统通知 |
-| `topic_reply` | 话题回复 |
-| `topic_like` | 话题点赞 |
-| `verification` | 认证通知 |
-| `invitation` | 邀请通知 |
-
----
-
-### 29. 通知详情
-
-**GET** `/notifications/{id}/`
-
-**权限**: `IsAuthenticated`
-
-**响应 (HTTP 200)**: 通知详情对象
-
----
-
-### 30. 删除通知
-
-**DELETE** `/notifications/{id}/`
-
-**权限**: `IsAuthenticated`
-
-**响应 (HTTP 204)**: No Content
-
----
-
-### 31. 未读通知数量
-
-**GET** `/notifications/unread-count/`
-
-**权限**: `IsAuthenticated`
-
-**响应 (HTTP 200)**:
-```json
-{
-  "unread_count": 5
-}
-```
-
----
-
-### 32. 标记单条通知已读
-
-**POST** `/notifications/{id}/read/`
-
-**权限**: `IsAuthenticated`
-
-**响应 (HTTP 200)**:
-```json
-{
-  "read": true
-}
-```
-
----
-
-### 33. 全部标记已读
-
-**POST** `/notifications/read-all/`
-
-**权限**: `IsAuthenticated`
-
-**响应 (HTTP 200)**:
-```json
-{
-  "message": "已全部标记为已读"
-}
-```
-
----
-
 ## 统一响应格式
 
 ### 成功响应
@@ -1813,12 +1591,6 @@ const getMyInvitations = async () => {
 const likeTopic = async (topicId) => {
   const { data } = await axios.post(`/api/neighbor-hub/topics/${topicId}/like/`)
   return data // { liked: true/false, likes_count: 6 }
-}
-
-// 提交认证申请
-const submitVerification = async (formData) => {
-  const { data } = await axios.post('/api/neighbor-hub/verification-requests/', formData)
-  return data
 }
 ```
 

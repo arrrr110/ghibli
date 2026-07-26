@@ -9,8 +9,6 @@ from .views import (
     CommunityViewSet,
     TopicViewSet,
     InvitationViewSet,
-    VerificationRequestViewSet,
-    NotificationViewSet,
 )
 
 app_name = 'neighbor_hub'
@@ -19,8 +17,6 @@ router = DefaultRouter()
 router.register(r'communities', CommunityViewSet, basename='community')
 router.register(r'topics', TopicViewSet, basename='topic')
 router.register(r'invitations', InvitationViewSet, basename='invitation')
-router.register(r'verification-requests', VerificationRequestViewSet, basename='verification-request')
-router.register(r'notifications', NotificationViewSet, basename='notification')
 
 urlpatterns = [
     # 切换小区（必须注册在 users/me/ 之前，否则会被 users/me/ 匹配）

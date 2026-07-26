@@ -9,8 +9,6 @@ from .models import (
     TopicSubscription,
     TopicReadRecord,
     Invitation,
-    VerificationRequest,
-    AppNotification,
 )
 
 
@@ -81,14 +79,3 @@ class InvitationAdmin(admin.ModelAdmin):
     list_display = ('inviter', 'invitee', 'inviter_community', 'status', 'created_at')
     list_filter = ('status', 'inviter_community')
 
-
-@admin.register(VerificationRequest)
-class VerificationRequestAdmin(admin.ModelAdmin):
-    list_display = ('name', 'community', 'building', 'status', 'reviewed_by', 'created_at')
-    list_filter = ('status', 'community')
-
-
-@admin.register(AppNotification)
-class AppNotificationAdmin(admin.ModelAdmin):
-    list_display = ('user', 'type', 'title', 'is_read', 'created_at')
-    list_filter = ('type', 'is_read')
