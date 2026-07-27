@@ -14,9 +14,13 @@ from .models import (
 
 
 class CommunitySerializer(serializers.ModelSerializer):
-    """小区序列化器"""
-    members_count = serializers.SerializerMethodField()
-    
+    """小区序列化器
+
+    注意：members_count 依赖 queryset 中的 annotate(members_count=Count('members'))，
+    调用方必须在 queryset 中添加该注解，否则字段值为 None。
+    """
+    members_count = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Community
         fields = [
@@ -25,9 +29,6 @@ class CommunitySerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
-    
-    def get_members_count(self, obj):
-        return obj.members.count()
 
 
 class NeighborHubProfileSerializer(serializers.ModelSerializer):
@@ -51,7 +52,8 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'is_verified', 'verified_at', 'verified_by',
             'invited_by', 'invited_by_name', 'last_login_at',
-            'created_at', 'updated_at'
+            'role', 'community', 'verification_note', 'is_active',
+            'created_at', 'updated_at',
         ]
     
     def get_phone(self, obj):
@@ -70,38 +72,6 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
             return inviter_profile.nickname
         return obj.invited_by.username
     
-    def update(self, instance, validated_data):
-        """
-        允许更新业务字段，禁止修改系统管理字段（认证、角色、UUID等）
-        可按需修改 allowed_fields 来开放/限制字段
-        """
-        # 用户可以修改的业务字段
-        allowed_fields = [
-            'nickname',     # 昵称
-            'avatar',       # 头像URL  
-            'building',     # 楼号
-            'bio',          # 个人简介
-            'join_note',    # 加入备注（审核前可修改）
-        ]
-        
-        # 禁止修改的系统字段（这些字段有特殊业务流程）
-        protected_fields = [
-            'role',         # 角色：需通过认证申请/管理后台设置
-            'is_verified',  # 认证状态：需通过认证流程
-            'verified_by',  # 认证人：系统自动设置
-            'verified_at',  # 认证时间：系统自动设置
-            'verification_note',  # 认证备注：认证流程设置
-            'community',    # 小区：需通过专门的小区切换接口
-            'invited_by',   # 邀请人：通过邀请流程自动设置
-        ]
-        
-        # 应用字段更新
-        for field in allowed_fields:
-            if field in validated_data:
-                setattr(instance, field, validated_data[field])
-        
-        instance.save()
-        return instance
 
 
 class CommentSerializer(serializers.ModelSerializer):
@@ -109,6 +79,7 @@ class CommentSerializer(serializers.ModelSerializer):
     author_nickname = serializers.SerializerMethodField()
     author_avatar = serializers.SerializerMethodField()
     author_building = serializers.CharField(read_only=True)
+    reply_to_nickname = serializers.SerializerMethodField()
     replies_count = serializers.SerializerMethodField()
     replies = serializers.SerializerMethodField()
     
@@ -118,12 +89,14 @@ class CommentSerializer(serializers.ModelSerializer):
             'id', 'topic',
             'author', 'author_nickname', 'author_avatar',
             'author_building', 'author_role',
-            'parent', 'content', 'likes_count',
+            'parent', 'reply_to', 'reply_to_nickname',
+            'content', 'likes_count',
             'is_active', 'replies_count', 'replies',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'author', 'author_building', 'author_role',
+            'reply_to', 'reply_to_nickname',
             'likes_count', 'is_active',
             'created_at', 'updated_at'
         ]
@@ -139,6 +112,15 @@ class CommentSerializer(serializers.ModelSerializer):
         """从 NeighborHubProfile 获取头像"""
         profile = getattr(obj.author, 'neighbor_hub_profile', None)
         return profile.avatar if profile else ''
+    
+    def get_reply_to_nickname(self, obj):
+        """获取被回复人的昵称（扁平化回复模型：reply_to 指向被回复的用户）"""
+        if not obj.reply_to:
+            return None
+        profile = getattr(obj.reply_to, 'neighbor_hub_profile', None)
+        if profile and profile.nickname:
+            return profile.nickname
+        return obj.reply_to.username
     
     def get_replies_count(self, obj):
         # 优先使用预取数据（避免 N+1 查询）
@@ -351,6 +333,7 @@ class InvitationCreateSerializer(serializers.Serializer):
 class InvitationSerializer(serializers.ModelSerializer):
     """邀请记录序列化器"""
     inviter_nickname = serializers.SerializerMethodField()
+    invitee_nickname = serializers.SerializerMethodField()
     community_name = serializers.CharField(source='inviter_community.name', read_only=True)
     
     class Meta:
@@ -358,7 +341,7 @@ class InvitationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'inviter', 'inviter_nickname',
             'inviter_community', 'community_name',
-            'invitee', 'status',
+            'invitee', 'invitee_nickname', 'status',
             'expires_at', 'accepted_at', 'created_at'
         ]
         read_only_fields = [
@@ -371,6 +354,15 @@ class InvitationSerializer(serializers.ModelSerializer):
         if profile and profile.nickname:
             return profile.nickname
         return obj.inviter.username
+    
+    def get_invitee_nickname(self, obj):
+        """从被邀请人的 NeighborHubProfile 获取昵称，回退到 username"""
+        if not obj.invitee:
+            return None
+        profile = getattr(obj.invitee, 'neighbor_hub_profile', None)
+        if profile and profile.nickname:
+            return profile.nickname
+        return obj.invitee.username
 
 
 class SwitchCommunitySerializer(serializers.Serializer):

@@ -1553,11 +1553,11 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 ## 四、邀请接口
 
 > **H5 场景说明**：
-> - **邀请链接格式**: `/join?inviter={user_id}`，**前端自行生成，后端不参与**
+> - **邀请链接格式**: `/auth?invited_by={user_id}`，**前端自行生成，后端不参与**
 > - **邀请流程**:
 >   1. 用户A（业主）分享链接给好友
 >   2. 好友点击链接打开 H5 注册/登录
->   3. 前端检测到 URL 参数 `inviter`，注册成功后调用 `POST /invitations/` 记录邀请关系
+>   3. 前端检测到 URL 参数 `invited_by`，注册成功后调用 `POST /invitations/` 记录邀请关系
 
 ---
 
@@ -1688,192 +1688,6 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 ---
 
-## 前端对接示例
-
-### 典型业务流程
-
-**普通用户流程:**
-```
-1. 用户登录 → 获得 JWT Token
-2. GET /api/neighbor-hub/users/me/ → 获取当前用户 Profile
-3. 检查 community 字段:
-   - null: 用户在中转站 → 展示选择小区/创建小区页面
-     a. 选择小区: GET /communities/ → POST /users/me/switch-community/ { community, join_note }
-     b. 创建小区: POST /communities/ → GET /communities/?mine=1 查看审核状态
-   - UUID: 用户已加入小区，检查 is_verified:
-     - false: 待业委会审核 → 展示"等待审核中"
-     - true: 可正常使用所有功能
-4. GET /api/neighbor-hub/topics/ → 浏览话题列表
-5. POST /api/neighbor-hub/topics/ → 创建话题（需已认证）
-6. 参与互动: 点赞、评论、订阅
-```
-
-**创建话题（含图片）流程:**
-```
-1. 进入「创建话题」页面
-   → POST /api/neighbor-hub/topics/draft/ → 获取草稿 topic_id + 已有图片
-2. 上传图片（可选，最多9张）
-   → POST /api/neighbor-hub/topics/{topic_id}/images/ (FormData, ≤500KB)
-   → 返回 { id, image_url, sort_order }
-3. 删除图片（可选）
-   → DELETE /api/neighbor-hub/topics/{topic_id}/images/{image_id}/
-4. 更新标题/内容/分类
-   → PATCH /api/neighbor-hub/topics/{topic_id}/ { title, content, category }
-5. 发布话题
-   → POST /api/neighbor-hub/topics/{topic_id}/publish/ → 话题进入信息流
-6. 关闭页面不保留草稿
-   → DELETE /api/neighbor-hub/topics/{topic_id}/ → 级联删除草稿+图片
-```
-
-**邀请注册流程（H5）:**
-```
-1. 用户A（业主）分享链接: https://域名.com/join?inviter={user_a_id}
-2. 好友B 点击链接打开 H5
-3. 好友B 注册/登录
-4. 前端检测到 URL 参数 inviter=xxx
-5. 前端调用 POST /api/neighbor-hub/invitations/ {"inviter": "xxx"}
-6. 后端记录邀请关系（invitee=当前用户，status=accepted）
-7. 好友B 提交认证申请，业委会审核
-```
-
-### Axios 示例
-
-```javascript
-// 注意：邀请链接由前端生成，后端不参与
-// 格式: https://your-domain.com/join?inviter={user_id}
-
-// ==================== 用户头像 ====================
-
-// 上传用户头像（multipart/form-data）
-const uploadAvatar = async (file) => {
-  const formData = new FormData()
-  formData.append('avatar', file)
-  const { data } = await axios.post('/api/neighbor-hub/users/me/avatar/', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  })
-  return data
-  // { avatar: 'https://...', message: '头像更新成功' }
-}
-
-// ==================== 话题相关 ====================
-
-// 获取或创建草稿话题（进入创建话题页面时调用）
-const getOrCreateDraft = async () => {
-  const { data } = await axios.post('/api/neighbor-hub/topics/draft/')
-  return data
-  // { id, is_draft: true, title, content, category, has_image, images: [...], ... }
-}
-
-// 更新草稿内容（标题/内容/分类）
-const updateDraft = async (topicId, { title, content, category }) => {
-  const { data } = await axios.patch(`/api/neighbor-hub/topics/${topicId}/`, {
-    title, content, category
-  })
-  return data
-}
-
-// 发布草稿话题
-const publishTopic = async (topicId, { title, content, category } = {}) => {
-  const { data } = await axios.post(`/api/neighbor-hub/topics/${topicId}/publish/`, {
-    title, content, category  // 可选，如已通过 PATCH 更新过可不传
-  })
-  return data
-}
-
-// 直接创建话题（无图片场景）
-const createTopic = async (topicData) => {
-  const { data } = await axios.post('/api/neighbor-hub/topics/', topicData)
-  return data
-}
-
-// ==================== 图片上传相关 ====================
-
-// 上传单张图片（multipart/form-data）
-const uploadTopicImage = async (topicId, file) => {
-  const formData = new FormData()
-  formData.append('image', file)
-  const { data } = await axios.post(
-    `/api/neighbor-hub/topics/${topicId}/images/`,
-    formData,
-    { headers: { 'Content-Type': 'multipart/form-data' } }
-  )
-  return data
-  // { id, topic, image_url, sort_order, created_at }
-}
-
-// 获取话题图片列表
-const getTopicImages = async (topicId) => {
-  const { data } = await axios.get(`/api/neighbor-hub/topics/${topicId}/images/`)
-  return data
-  // [ { id, topic, image_url, sort_order, created_at }, ... ]
-}
-
-// 删除单张图片
-const deleteTopicImage = async (topicId, imageId) => {
-  const { data } = await axios.delete(
-    `/api/neighbor-hub/topics/${topicId}/images/${imageId}/`
-  )
-  return data
-  // { message: '图片已删除' }
-}
-
-// ==================== 其他接口 ====================
-
-// 获取小区列表（仅已激活的）
-const getCommunities = async () => {
-  const { data } = await axios.get('/api/neighbor-hub/communities/')
-  return data
-}
-
-// 查看自己创建的小区（含未激活，查看审核进度）
-const getMyCommunities = async () => {
-  const { data } = await axios.get('/api/neighbor-hub/communities/', {
-    params: { mine: 1 }
-  })
-  return data
-}
-
-// 创建小区（非管理员创建后 is_active=false，待 admin 审核）
-const createCommunity = async (communityData) => {
-  const { data } = await axios.post('/api/neighbor-hub/communities/', communityData)
-  return data
-  // { id, name, address, is_active: false, created_by: '当前用户UUID', ... }
-}
-
-// 切换/加入小区（附带 join_note）
-const switchCommunity = async (communityId, joinNote = '') => {
-  const { data } = await axios.post('/api/neighbor-hub/users/me/switch-community/', {
-    community: communityId,
-    join_note: joinNote
-  })
-  return data
-  // { message: '小区切换成功', data: {...}, meta: {...} }
-}
-
-// 记录邀请关系 - 被邀请用户登录成功后调用
-const recordInvitation = async (inviterId) => {
-  // inviterId 从 URL 参数获取: ?inviter=xxx
-  const { data } = await axios.post('/api/neighbor-hub/invitations/', {
-    inviter: inviterId
-  })
-  return data
-}
-
-// 我的邀请记录
-const getMyInvitations = async () => {
-  const { data } = await axios.get('/api/neighbor-hub/invitations/')
-  return data
-}
-
-// 点赞话题
-const likeTopic = async (topicId) => {
-  const { data } = await axios.post(`/api/neighbor-hub/topics/${topicId}/like/`)
-  return data // { liked: true/false, likes_count: 6 }
-}
-```
-
----
-
 ## 更新日志
 
 | 版本 | 日期 | 说明 |
@@ -1884,7 +1698,7 @@ const likeTopic = async (topicId) => {
 | v2.0.0 | 2026-07-25 | 图片上传功能：新增草稿话题机制（POST /topics/draft/、POST /topics/{id}/publish/）；新增图片上传/列表/删除接口（基于阿里云 OSS）；新增 TopicImage 模型；Topic 移除 image_url 字段，改为多图模型；列表页排除草稿话题；详情页返回 images 字段 |
 | v1.5.0 | 2026-07-23 | 话题详情接口优化：修复 500 错误（Coalesce+Subquery）；新增 `subscriptions_count`（订阅数）、`readers_count`（阅读数）字段；修复 `author_nickname`/`author_avatar` 从 NeighborHubProfile 获取（v1.4.0 重构遗留）；详情页返回评论树（含 replies 嵌套）；评论列表接口增加 replies 嵌套；`read` 接口递增 `views_count` 并返回；详情页不再受列表筛选参数影响 |
 | v1.4.0 | 2026-07-20 | 用户模型重构：User 只负责基础认证（phone/email/username+password）；nickname、avatar 移至 NeighborHubProfile（应用专属）；UserAppProfile 作为应用标记，业委会可删除应用标记禁用用户访问 |
-| v1.3.0 | 2026-07-20 | 邀请系统重构：移除邀请码机制，改为链接+二维码模式；前端生成邀请链接 `/join?inviter={user_id}`；后端只负责记录邀请关系 `POST /invitations/ {"inviter": "xxx"}`；过期时间调整为30天 |
+| v1.3.0 | 2026-07-20 | 邀请系统重构：移除邀请码机制，改为链接+二维码模式；前端生成邀请链接 `/auth?invited_by={user_id}`；后端只负责记录邀请关系 `POST /invitations/ {"invited_by": "xxx"}`；过期时间调整为30天 |
 | v1.2.0 | 2026-07-19 | 新增 POST `/users/me/switch-community/` 小区切换接口；新增业委会权限管理规则 |
 | v1.1.0 | 2026-07-19 | 新增小区切换规则：切换小区后认证自动失效，需重新认证 |
 | v1.0.0 | 2026-07-19 | 初始版本，包含完整的社区治理功能模块 |

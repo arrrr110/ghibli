@@ -244,7 +244,17 @@ class Comment(models.Model):
     
     parent = models.ForeignKey(
         'self', on_delete=models.CASCADE,
-        null=True, blank=True, related_name='replies'
+        null=True, blank=True, related_name='replies',
+        verbose_name="根评论",
+        help_text="回复的根评论（顶级评论），非回复时为 null"
+    )
+    reply_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='comment_replies',
+        verbose_name="回复给",
+        help_text="回复的目标用户（扁平化回复模型：parent 指向根评论，reply_to 指向被回复的用户）"
     )
     
     content = models.TextField(max_length=1000)

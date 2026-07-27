@@ -62,15 +62,6 @@ class TopicCursorPagination(CursorPagination):
     ordering = ('-is_pinned', '-published_at')
 
 
-class CurrentUserProfileView(APIView):
-    """
-    获取/更新当前用户在 neighbor_hub 的 Profile
-    GET /api/neighbor-hub/users/me/
-    PATCH /api/neighbor-hub/users/me/
-    """
-    permission_classes = [IsAuthenticated]
-
-
 class UserProfileLookupView(APIView):
     """
     根据档案ID查询用户档案（用于邀请功能）
@@ -146,7 +137,17 @@ class CurrentUserProfileView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         serializer = NeighborHubProfileSerializer(profile, context={'request': request})
-        return Response(serializer.data)
+        data = serializer.data
+        # 附带当前用户创建的小区列表（含未激活，用于中转站/等待审核页减少额外请求）
+        my_communities = Community.objects.filter(
+            created_by=request.user
+        ).annotate(
+            members_count=Count('members')
+        ).order_by('-created_at')
+        data['my_communities'] = CommunitySerializer(
+            my_communities, many=True, context={'request': request}
+        ).data
+        return Response(data)
     
     def patch(self, request):
         profile = getattr(request.user, 'neighbor_hub_profile', None)
@@ -161,6 +162,33 @@ class CurrentUserProfileView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class UserStatsView(APIView):
+    """
+    获取当前用户的聚合统计数据
+    GET /api/neighbor-hub/users/me/stats/
+
+    用于个人中心页展示统计数字，避免前端拉取话题列表做计数。
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            'topics_count': Topic.objects.filter(
+                author=user, is_draft=False
+            ).count(),
+            'subscriptions_count': TopicSubscription.objects.filter(
+                user=user
+            ).count(),
+            'liked_count': TopicLike.objects.filter(
+                user=user
+            ).count(),
+            'read_count': TopicReadRecord.objects.filter(
+                user=user
+            ).count(),
+        })
 
 
 class AvatarUploadView(GenericAPIView):
@@ -334,7 +362,6 @@ class CommunityViewSet(ModelViewSet):
     DELETE /api/neighbor-hub/communities/{id}/     删除
     GET    /api/neighbor-hub/communities/{id}/members/  成员列表
     """
-    queryset = Community.objects.select_related('created_by').prefetch_related('members')
     serializer_class = CommunitySerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'pk'
@@ -346,7 +373,9 @@ class CommunityViewSet(ModelViewSet):
         return [IsAuthenticated(), IsCommitteeMember()]
     
     def get_queryset(self):
-        queryset = Community.objects.select_related('created_by').prefetch_related('members')
+        queryset = Community.objects.select_related('created_by').annotate(
+            members_count=Count('members')
+        )
         user = self.request.user
         
         if self.action == 'list':
@@ -365,7 +394,15 @@ class CommunityViewSet(ModelViewSet):
                 queryset = queryset.filter(
                     Q(is_active=True) | Q(created_by=user)
                 )
-        
+        else:
+            # 管理类 action（members/verify_member/remove_member/kick_member/update/destroy）：
+            # 业委会只能操作自己所属的小区，防止跨小区越权
+            profile = getattr(user, 'neighbor_hub_profile', None)
+            if profile and profile.community_id:
+                queryset = queryset.filter(id=profile.community_id)
+            else:
+                queryset = queryset.none()
+
         return queryset
     
     def perform_create(self, serializer):
@@ -385,14 +422,6 @@ class CommunityViewSet(ModelViewSet):
         - is_verified: true/false  按认证状态筛选
         - role: owner/committee/property  按角色筛选
         """
-        # 仅业委会可访问
-        profile = getattr(request.user, 'neighbor_hub_profile', None)
-        if not profile or profile.role != 'committee':
-            return Response(
-                {'error': '仅业委会成员可查看成员列表'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         community = self.get_object()
         queryset = NeighborHubProfile.objects.filter(
             community=community, is_active=True
@@ -430,14 +459,6 @@ class CommunityViewSet(ModelViewSet):
         - Topic/Comment 等历史数据
         - Invitation 邀请记录
         """
-        # 仅业委会可操作
-        profile = getattr(request.user, 'neighbor_hub_profile', None)
-        if not profile or profile.role != 'committee':
-            return Response(
-                {'error': '仅业委会成员可删除成员'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         community = self.get_object()
         
         # 不能删除自己
@@ -501,14 +522,6 @@ class CommunityViewSet(ModelViewSet):
           "note": "审核备注"
         }
         """
-        # 仅业委会可操作
-        profile = getattr(request.user, 'neighbor_hub_profile', None)
-        if not profile or profile.role != 'committee':
-            return Response(
-                {'error': '仅业委会成员可操作'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         community = self.get_object()
 
         # 查找目标用户
@@ -632,14 +645,6 @@ class CommunityViewSet(ModelViewSet):
         
         用于审核人员拒绝待审核用户。
         """
-        # 仅业委会可操作
-        profile = getattr(request.user, 'neighbor_hub_profile', None)
-        if not profile or profile.role != 'committee':
-            return Response(
-                {'error': '仅业委会成员可操作'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         community = self.get_object()
         
         # 不能踢自己
@@ -806,6 +811,9 @@ class TopicViewSet(ModelViewSet):
                         )
                     )
                 )
+            elif topic_filter == 'mine':
+                # 我发起的
+                queryset = queryset.filter(author=user)
             
             # 筛选：按分类
             category = self.request.query_params.get('category')
@@ -889,7 +897,8 @@ class TopicViewSet(ModelViewSet):
             replies_qs = Comment.objects.filter(
                 is_active=True
             ).select_related(
-                'author', 'author__neighbor_hub_profile'
+                'author', 'author__neighbor_hub_profile',
+                'reply_to', 'reply_to__neighbor_hub_profile',
             ).order_by('created_at')
             top_comments_qs = Comment.objects.filter(
                 parent__isnull=True, is_active=True
@@ -1243,7 +1252,10 @@ class TopicViewSet(ModelViewSet):
             # 顶级评论（含回复预取）
             replies_qs = Comment.objects.filter(
                 is_active=True
-            ).select_related('author', 'author__neighbor_hub_profile').order_by('created_at')
+            ).select_related(
+                'author', 'author__neighbor_hub_profile',
+                'reply_to', 'reply_to__neighbor_hub_profile',
+            ).order_by('created_at')
             comments = Comment.objects.filter(
                 topic=topic, parent__isnull=True, is_active=True
             ).select_related(
@@ -1265,11 +1277,23 @@ class TopicViewSet(ModelViewSet):
             raise ValidationError({'content': '评论内容不能为空'})
         parent_id = request.data.get('parent')
         parent = None
+        reply_to = None
         if parent_id:
             try:
-                parent = Comment.objects.get(id=parent_id, topic=topic)
+                replied_comment = Comment.objects.get(id=parent_id, topic=topic)
             except Comment.DoesNotExist:
                 raise ValidationError({'parent': '父评论不存在'})
+            # 扁平化回复模型：
+            # - parent 始终指向根评论（顶级评论）
+            # - reply_to 指向被回复的用户
+            if replied_comment.parent is None:
+                # 回复的是顶级评论 → parent 就是它，reply_to 是它的作者
+                parent = replied_comment
+                reply_to = replied_comment.author
+            else:
+                # 回复的是某条回复 → parent 提升为根评论，reply_to 是被回复回复的作者
+                parent = replied_comment.parent
+                reply_to = replied_comment.author
         profile = getattr(request.user, 'neighbor_hub_profile', None)
         comment = Comment.objects.create(
             topic=topic,
@@ -1277,6 +1301,7 @@ class TopicViewSet(ModelViewSet):
             author_building=profile.building if profile else '',
             author_role=profile.role if profile else 'owner',
             parent=parent,
+            reply_to=reply_to,
             content=content
         )
         topic.comments_count += 1
@@ -1346,7 +1371,11 @@ class InvitationViewSet(ModelViewSet):
         """获取当前用户相关的邀请记录（作为邀请人或被邀请人）"""
         return Invitation.objects.filter(
             Q(inviter=self.request.user) | Q(invitee=self.request.user)
-        ).select_related('inviter_community', 'invitee', 'inviter')
+        ).select_related(
+            'inviter_community',
+            'inviter', 'inviter__neighbor_hub_profile',
+            'invitee', 'invitee__neighbor_hub_profile',
+        )
     
     def create(self, request, *args, **kwargs):
         """创建邀请记录 - 前端传入 inviter（邀请人 user_id）"""
@@ -1385,6 +1414,13 @@ class InvitationViewSet(ModelViewSet):
             accepted_at=timezone.now(),
             expires_at=timezone.now() + timedelta(days=30)
         )
+        
+        # 重新查询以预取关联数据，避免序列化时 N+1
+        invitation = Invitation.objects.select_related(
+            'inviter', 'inviter__neighbor_hub_profile',
+            'invitee', 'invitee__neighbor_hub_profile',
+            'inviter_community',
+        ).get(id=invitation.id)
         
         response_serializer = InvitationSerializer(invitation, context={'request': request})
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
