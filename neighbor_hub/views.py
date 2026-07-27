@@ -221,13 +221,14 @@ class AvatarUploadView(GenericAPIView):
 
 class SwitchCommunityView(APIView):
     """
-    切换当前用户所属小区
-    POST /api/neighbor-hub/users/me/community/
+    切换/退出当前用户所属小区
+    POST /api/neighbor-hub/users/me/switch-community/
     
     规则：
-    - 切换到新小区后，用户认证状态自动重置为未认证
-    - 用户可自由切换回原小区，需重新认证
-    - 小区切换后，用户仅能访问新小区的数据
+    - 传入 community UUID → 切换/加入该小区，重置认证状态
+    - 不传 community 或传 null → 退出当前小区，回到中转站
+    - 切换/退出后认证状态自动重置为未认证
+    - 退出后用户回到中转站，可重新选择小区
     """
     permission_classes = [IsAuthenticated]
     
@@ -235,7 +236,8 @@ class SwitchCommunityView(APIView):
         serializer = SwitchCommunitySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        target_community_id = serializer.validated_data['community']
+        target_community_id = serializer.validated_data.get('community')
+        join_note = serializer.validated_data.get('join_note', '')
         profile = getattr(request.user, 'neighbor_hub_profile', None)
         
         if not profile:
@@ -244,6 +246,45 @@ class SwitchCommunityView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
+        # 记录旧小区信息（用于响应）
+        old_community_name = profile.community.name if profile.community else None
+        was_verified = profile.is_verified
+        old_role = profile.role
+        
+        if target_community_id is None:
+            # 退出当前小区，回到中转站
+            if not profile.community:
+                return Response(
+                    {'error': '您当前不在任何小区中'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            profile.community = None
+            profile.is_verified = False
+            profile.role = NeighborHubProfile.Role.OWNER
+            profile.verified_by = None
+            profile.verified_at = None
+            profile.verification_note = ''
+            profile.join_note = ''
+            profile.building = ''
+            profile.save()
+            
+            response_serializer = NeighborHubProfileSerializer(
+                profile, context={'request': request}
+            )
+            return Response({
+                'message': '已退出小区，回到中转站',
+                'data': response_serializer.data,
+                'meta': {
+                    'old_community_name': old_community_name,
+                    'was_verified': was_verified,
+                    'old_role': old_role,
+                    'new_community_name': None,
+                    'requires_reverification': True,
+                }
+            })
+        
+        # 切换到目标小区
         # 检查是否切换到同一个小区
         if profile.community and profile.community_id == target_community_id:
             return Response(
@@ -254,11 +295,6 @@ class SwitchCommunityView(APIView):
         # 获取目标小区
         target_community = Community.objects.get(id=target_community_id)
         
-        # 记录旧小区信息（用于响应）
-        old_community_name = profile.community.name if profile.community else None
-        was_verified = profile.is_verified
-        old_role = profile.role
-        
         # 执行小区切换：重置认证状态
         profile.community = target_community
         profile.is_verified = False
@@ -266,6 +302,7 @@ class SwitchCommunityView(APIView):
         profile.verified_by = None
         profile.verified_at = None
         profile.verification_note = ''
+        profile.join_note = join_note
         profile.save()
         
         # 返回更新后的 Profile
@@ -290,14 +327,14 @@ class SwitchCommunityView(APIView):
 class CommunityViewSet(ModelViewSet):
     """
     小区 CRUD
-    GET    /api/neighbor-hub/communities/          列表
-    POST   /api/neighbor-hub/communities/          创建
+    GET    /api/neighbor-hub/communities/          列表（仅已激活小区；?mine=1 查看自己创建的含未激活）
+    POST   /api/neighbor-hub/communities/          创建（非管理员创建的小区 is_active=False，待 admin 审核）
     GET    /api/neighbor-hub/communities/{id}/     详情
     PATCH  /api/neighbor-hub/communities/{id}/     更新
     DELETE /api/neighbor-hub/communities/{id}/     删除
     GET    /api/neighbor-hub/communities/{id}/members/  成员列表
     """
-    queryset = Community.objects.prefetch_related('members')
+    queryset = Community.objects.select_related('created_by').prefetch_related('members')
     serializer_class = CommunitySerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'pk'
@@ -308,8 +345,36 @@ class CommunityViewSet(ModelViewSet):
         # 更新/删除小区需要业委会权限
         return [IsAuthenticated(), IsCommitteeMember()]
     
+    def get_queryset(self):
+        queryset = Community.objects.select_related('created_by').prefetch_related('members')
+        user = self.request.user
+        
+        if self.action == 'list':
+            # ?mine=1 查看自己创建的小区（含未激活，用于查看审核进度）
+            mine = self.request.query_params.get('mine')
+            if mine and mine.lower() in ('1', 'true'):
+                queryset = queryset.filter(created_by=user)
+            elif not user.is_staff:
+                # 普通用户只能看到已激活的小区
+                queryset = queryset.filter(is_active=True)
+            # is_staff 可以看到所有小区
+        
+        elif self.action == 'retrieve':
+            # 详情页：允许查看已激活的、自己创建的、或 staff
+            if not user.is_staff:
+                queryset = queryset.filter(
+                    Q(is_active=True) | Q(created_by=user)
+                )
+        
+        return queryset
+    
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        """创建小区：非管理员创建的小区默认未激活，待 admin 审核后激活"""
+        is_active = self.request.user.is_staff
+        serializer.save(
+            created_by=self.request.user,
+            is_active=is_active
+        )
     
     @action(detail=True, methods=['get'])
     def members(self, request, pk=None):

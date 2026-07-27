@@ -14,7 +14,7 @@ class User(AbstractUser):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     phone = models.CharField(
-        max_length=20, 
+        max_length=11, 
         blank=True, 
         null=True, 
         unique=True,
@@ -39,7 +39,8 @@ class User(AbstractUser):
     
     def __str__(self):
         if self.phone:
-            return f"{self.phone[:3]}****{self.phone[-4:]}"
+            # return f"{self.phone[:3]}****{self.phone[-4:]}"
+            return self.phone
         if self.email:
             return self.email
         return self.username or str(self.id)[:8]

@@ -73,6 +73,11 @@ class NeighborHubProfile(models.Model):
         default=Role.OWNER, verbose_name="角色"
     )
     building = models.CharField(max_length=50, blank=True, verbose_name="楼号")
+    join_note = models.CharField(
+        max_length=255, blank=True, default='',
+        verbose_name="加入备注",
+        help_text="用户加入小区时填写的备注，供业委会审核参考"
+    )
     
     # 认证状态
     is_verified = models.BooleanField(default=False, verbose_name="已认证")

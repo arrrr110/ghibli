@@ -42,7 +42,7 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user_id', 'nickname', 'avatar', 'phone',
             'community', 'community_name',
-            'role', 'building', 'bio',
+            'role', 'building', 'bio', 'join_note',
             'is_verified', 'verified_at', 'verification_note',
             'invited_by', 'invited_by_name',
             'is_active', 'last_login_at',
@@ -81,6 +81,7 @@ class NeighborHubProfileSerializer(serializers.ModelSerializer):
             'avatar',       # 头像URL  
             'building',     # 楼号
             'bio',          # 个人简介
+            'join_note',    # 加入备注（审核前可修改）
         ]
         
         # 禁止修改的系统字段（这些字段有特殊业务流程）
@@ -373,14 +374,25 @@ class InvitationSerializer(serializers.ModelSerializer):
 
 
 class SwitchCommunitySerializer(serializers.Serializer):
-    """小区切换请求序列化器"""
+    """小区切换/加入请求序列化器
+    
+    用法：
+    - 传入 community UUID → 切换/加入该小区
+    - 不传 community 或传 null → 退出当前小区，回到中转站
+    """
     community = serializers.UUIDField(
-        required=True,
-        help_text="目标小区 ID"
+        required=False, allow_null=True,
+        help_text="目标小区 ID（传 null 或不传表示退出当前小区，回到中转站）"
     )
-
+    join_note = serializers.CharField(
+        max_length=255, required=False, allow_blank=True,
+        help_text="加入备注，供业委会审核参考"
+    )
+    
     def validate_community(self, value):
-        """验证目标小区是否存在且激活"""
+        """验证目标小区是否存在且激活（null 跳过校验）"""
+        if value is None:
+            return None
         try:
             community = Community.objects.get(id=value)
         except Community.DoesNotExist:

@@ -3,7 +3,7 @@
 > **Base URL**: `http://your-domain.com/api/neighbor-hub/`  
 > **认证方式**: JWT (Bearer Token)  
 > **数据格式**: JSON  
-> **最后更新时间**: 2026-07-25
+> **最后更新时间**: 2026-07-27
 
 ---
 
@@ -49,12 +49,12 @@ Authorization: Bearer <access_token>
 | 模块 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|------|
 | 用户档案 | GET | `/users/me/` | 已登录 | 获取当前用户 Profile |
-| 用户档案 | PATCH | `/users/me/` | 已登录 | 更新当前用户 Profile（仅 building/bio） |
-| 用户档案 | POST | `/users/me/switch-community/` | 已登录 | 切换小区（重置认证状态） |
+| 用户档案 | PATCH | `/users/me/` | 已登录 | 更新当前用户 Profile（nickname/avatar/building/bio/join_note） |
+| 用户档案 | POST | `/users/me/switch-community/` | 已登录 | 切换/退出小区（传UUID切换，传null退出回中转站，可附带 join_note） |
 | 用户档案 | GET | `/users/profile/{user_id}/` | 已登录 | 查询指定用户档案（用于邀请） |
-| 小区 | GET | `/communities/` | 已登录 | 小区列表 |
-| 小区 | POST | `/communities/` | 已登录 + 业委会 | 创建小区 |
-| 小区 | GET | `/communities/{id}/` | 已登录 | 小区详情 |
+| 小区 | GET | `/communities/` | 已登录 | 小区列表（默认仅已激活；`?mine=1` 查看自己创建的含未激活） |
+| 小区 | POST | `/communities/` | 已登录 | 创建小区（非管理员创建的 `is_active=False`，待 admin 审核） |
+| 小区 | GET | `/communities/{id}/` | 已登录 | 小区详情（可查看已激活的或自己创建的） |
 | 小区 | PATCH | `/communities/{id}/` | 已登录 + 业委会 | 更新小区 |
 | 小区 | DELETE | `/communities/{id}/` | 已登录 + 业委会 | 删除小区 |
 | 小区 | GET | `/communities/{id}/members/` | 已登录 + 业委会 | 小区成员列表（支持筛选） |
@@ -107,6 +107,7 @@ Authorization: Bearer <access_token>
   "role": "owner|committee|property",
   "building": "1号楼",
   "bio": "个人简介",
+  "join_note": "我是3号楼业主",
   "is_verified": true,
   "verified_at": "2026-07-19T10:00:00Z",
   "verification_note": "审核备注",
@@ -132,6 +133,7 @@ Authorization: Bearer <access_token>
 | role | string | 用户角色 |
 | building | string | 楼号 |
 | bio | string | 个人简介 |
+| join_note | string | 加入备注（用户加入小区时填写，供业委会审核参考） |
 | is_verified | boolean | 是否已认证 |
 | verified_at | datetime/null | 认证时间 |
 | invited_by | UUID/null | 邀请人 ID |
@@ -151,7 +153,8 @@ Authorization: Bearer <access_token>
   "nickname": "新昵称",
   "avatar": "https://example.com/avatar.jpg",
   "building": "2号楼",
-  "bio": "我是小区热心业主"
+  "bio": "我是小区热心业主",
+  "join_note": "我是3号楼业主，请通过审核"
 }
 ```
 
@@ -163,6 +166,7 @@ Authorization: Bearer <access_token>
 | avatar | string | 否 | 头像URL |
 | building | string | 否 | 楼号（最大50字符） |
 | bio | string | 否 | 个人简介（最大200字符） |
+| join_note | string | 否 | 加入备注（最大255字符，审核前可修改） |
 
 **🔒 系统保护字段**（不可通过此接口修改）：
 - `role` - 角色管理需通过认证申请或管理后台
@@ -175,30 +179,40 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 3. 切换小区
+### 3. 切换/退出小区
 
 **POST** `/users/me/switch-community/`
 
 **权限**: `IsAuthenticated`
 
 **功能说明**:
-- 用户可自由切换到任意已激活的小区
-- 切换后认证状态自动重置为未认证（`is_verified=False, role=owner`）
-- 用户切换回原小区后，同样需要重新认证
-- 小区切换后，用户仅能访问新小区的话题、评论等数据
+- **传入 community UUID** → 切换/加入该小区，认证状态重置为未认证
+- **不传 community 或传 null** → 退出当前小区，回到中转站
+- 切换/退出后认证状态自动重置（`is_verified=False, role=owner`）
+- 退出小区时同时清空 `building`、`join_note`、认证相关字段
+- 可附带 `join_note` 加入备注，供业委会审核参考（仅切换时生效）
 
-**请求体**:
+**请求体（切换小区）**:
 ```json
 {
-  "community": "目标小区UUID"
+  "community": "目标小区UUID",
+  "join_note": "我是3号楼业主，请通过审核"
+}
+```
+
+**请求体（退出小区，回到中转站）**:
+```json
+{
+  "community": null
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| community | UUID | ✅ | 目标小区 ID（必须存在且已激活） |
+| community | UUID/null | 否 | 目标小区 ID（必须存在且已激活）；传 `null` 或不传表示退出当前小区 |
+| join_note | string | 否 | 加入备注（最大255字符，供业委会审核参考，仅切换时生效） |
 
-**响应 (HTTP 200)**:
+**响应 (HTTP 200) — 切换小区**:
 ```json
 {
   "message": "小区切换成功",
@@ -211,6 +225,7 @@ Authorization: Bearer <access_token>
     "community_name": "新小区名称",
     "role": "owner",
     "building": "",
+    "join_note": "我是3号楼业主",
     "is_verified": false,
     "verified_at": null,
     ...
@@ -220,6 +235,34 @@ Authorization: Bearer <access_token>
     "was_verified": true,
     "old_role": "owner",
     "new_community_name": "新小区名称",
+    "requires_reverification": true
+  }
+}
+```
+
+**响应 (HTTP 200) — 退出小区**:
+```json
+{
+  "message": "已退出小区，回到中转站",
+  "data": {
+    "id": "uuid",
+    "user_id": "uuid",
+    "nickname": "用户昵称",
+    "phone": "138****8000",
+    "community": null,
+    "community_name": null,
+    "role": "owner",
+    "building": "",
+    "join_note": "",
+    "is_verified": false,
+    "verified_at": null,
+    ...
+  },
+  "meta": {
+    "old_community_name": "原小区名称",
+    "was_verified": false,
+    "old_role": "owner",
+    "new_community_name": null,
     "requires_reverification": true
   }
 }
@@ -240,6 +283,7 @@ Authorization: Bearer <access_token>
 | HTTP | 场景 | 响应 |
 |------|------|------|
 | 400 | 切换到当前小区 | `{"error": "您已经是该小区的成员"}` |
+| 400 | 退出但当前无小区 | `{"error": "您当前不在任何小区中"}` |
 | 404 | 用户档案不存在 | `{"error": "用户档案不存在"}` |
 | 400 | 小区参数校验失败 | `{"community": ["目标小区不存在"]}` |
 | 400 | 小区未激活 | `{"community": ["目标小区未激活，无法加入"]}` |
@@ -275,11 +319,99 @@ Authorization: Bearer <access_token>
 
 | 规则 | 说明 |
 |------|------|
-| 创建小区 | 任何已登录用户均可创建小区 |
+| 创建小区 | 任何已登录用户均可创建小区，但非管理员创建的小区 `is_active=False`，需 admin 在后台审核激活后才会出现在小区列表中 |
 | 业委会任命 | 仅平台管理员（超级用户）可通过 Django Admin 后台设置用户的 `role=committee` |
 | 认证权限 | 只有被任命为业委会的小区才能审核该小区的认证申请 |
 
-> **工作流**：用户创建小区 → 通过邀请或自由加入发展成员 → 管理员在后台任命业委会 → 业委会开始审核成员身份
+> **工作流**：用户创建小区（`is_active=False`） → admin 在后台审核激活 → admin 任命业委会 → 业委会审核成员身份
+
+---
+
+## 中转站流程（无小区用户）
+
+当用户注册时没有 `invited_by` 参数（非邀请注册），创建的 `NeighborHubProfile` 中 `community=null`、`invited_by=null`，用户停留在中转站页面。
+
+### 中转站判断方式
+
+前端通过 `GET /api/neighbor-hub/users/me/` 获取 Profile，检查 `community` 字段：
+
+| `community` 值 | 含义 | 前端行为 |
+|----------------|------|---------|
+| `null` | 用户在中转站 | 展示中转站页面（选择小区 / 创建小区工单） |
+| UUID | 用户已加入小区 | 正常进入小区首页 |
+
+同时检查 `is_verified` 字段：
+
+| `is_verified` 值 | 含义 | 前端行为 |
+|------------------|------|---------|
+| `false` | 待业委会审核 | 展示"等待审核中"提示页 |
+| `true` | 已认证 | 正常使用所有功能 |
+
+### 路径1：选择已有小区
+
+用户从已激活的小区列表中选择一个小区，提交加入申请（附带 `join_note`），自动进入该小区的业委会待审核队列。
+
+```
+1. GET /api/neighbor-hub/communities/          → 已激活小区列表
+2. POST /api/neighbor-hub/users/me/switch-community/  → 选择小区 + 附带 join_note
+   → community = 目标小区, is_verified = false
+3. GET /api/neighbor-hub/users/me/              → 查看状态
+   → community != null, is_verified = false → 展示"等待审核中"
+   → community != null, is_verified = true  → 审核通过，进入小区首页
+4. PATCH /api/neighbor-hub/users/me/            → 审核前可修改 join_note
+5. POST /api/neighbor-hub/users/me/switch-community/  → 可切换到其他小区（重新进入待审核）
+```
+
+业委会审核入口：
+```
+GET /api/neighbor-hub/communities/{id}/members/?is_verified=false  → 待审核成员列表
+POST /api/neighbor-hub/communities/{id}/members/{user_id}/verify/  → 通过审核
+POST /api/neighbor-hub/communities/{id}/members/{user_id}/kick/    → 拒绝（打回中转站）
+```
+
+### 路径2：申请创建小区
+
+用户提交创建小区数据，admin 审核通过后激活小区，用户再走路径1选择该小区。
+
+```
+1. POST /api/neighbor-hub/communities/          → 创建小区（is_active=false）
+2. GET /api/neighbor-hub/communities/?mine=1    → 查看自己创建的小区审核状态
+   → is_active = false → 待审核
+   → is_active = true  → 已通过，admin 已激活
+3. 小区激活后，走路径1选择该小区
+```
+
+admin 审核入口：
+```
+Django Admin 后台 → Community 列表 → 勾选 is_active → 保存
+```
+
+### 中转站流程图
+
+```
+用户注册（无 invited_by）
+    ↓
+GET /users/me/  → community: null
+    ↓
+┌─────────────────────────────────────────────┐
+│              中转站页面                        │
+├──────────────────┬──────────────────────────┤
+│  路径1：选择小区  │  路径2：创建小区工单       │
+│                  │                          │
+│ GET /communities/│ POST /communities/       │
+│ 选择小区         │ (is_active=false)        │
+│      ↓           │      ↓                   │
+│ POST /switch-    │ GET /communities/        │
+│   community/     │   ?mine=1                │
+│ (含 join_note)   │ (查看审核状态)            │
+│      ↓           │      ↓                   │
+│ 待业委会审核      │ 待 admin 审核             │
+│      ↓           │      ↓                   │
+│ verify / kick    │ admin 激活 is_active     │
+│      ↓           │      ↓                   │
+│ 进入小区首页      │ 回到路径1选择该小区        │
+└──────────────────┴──────────────────────────┘
+```
 
 ### 4. 查询用户档案（用于邀请功能）
 
@@ -412,6 +544,28 @@ GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
 
 **权限**: `IsAuthenticated`
 
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| mine | string | 否 | `1` 或 `true` 时仅返回当前用户创建的小区（含未激活的，用于查看创建审核进度） |
+
+**访问规则**:
+
+| 用户类型 | 默认（不传 mine） | `?mine=1` |
+|----------|-------------------|----------|
+| 普通用户 | 仅 `is_active=True` 的小区 | 自己创建的所有小区（含未激活） |
+| 管理员（is_staff） | 所有小区 | 自己创建的所有小区 |
+
+**请求示例**:
+```
+# 查看已激活的小区列表（中转站选择小区时使用）
+GET /communities/
+
+# 查看自己创建的小区（含未激活，用于查看审核进度）
+GET /communities/?mine=1
+```
+
 **响应 (HTTP 200)**:
 ```json
 [
@@ -421,6 +575,7 @@ GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
     "address": "北京市朝阳区xxx路100号",
     "description": "高品质住宅小区",
     "is_active": true,
+    "created_by": "uuid",
     "established_at": "2015-06-01",
     "members_count": 120,
     "created_at": "2026-07-19T10:00:00Z",
@@ -429,13 +584,28 @@ GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
 ]
 ```
 
+**响应字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| is_active | boolean | 小区是否已激活（`false` 表示待 admin 审核） |
+| created_by | UUID/null | 创建者用户 ID（查看审核进度时用） |
+| created_by_phone | string/null | 创建者手机号（仅 admin 或创建者本人可见，其他用户返回 `null`） |
+
 ---
 
 ### 4. 创建小区
 
 **POST** `/communities/`
 
-**权限**: `IsAuthenticated` + `IsCommitteeMember`
+**权限**: `IsAuthenticated`
+
+**功能说明**:
+- 任何已登录用户均可创建小区
+- **非管理员**创建的小区 `is_active=False`，不会出现在公开小区列表中，需 admin 在 Django Admin 后台审核激活
+- **管理员**（`is_staff=True`）创建的小区 `is_active=True`，直接生效
+- `created_by` 自动设置为当前用户
+- 用户可通过 `GET /communities/?mine=1` 查看自己创建的小区审核状态
 
 **请求体**:
 ```json
@@ -454,9 +624,29 @@ GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
 | description | string | 否 | 小区描述 |
 | established_at | date | 否 | 建成日期（格式：YYYY-MM-DD） |
 
+> **注意**: `is_active` 字段为只读，由系统根据创建者身份自动设置。用户不能通过 API 修改小区激活状态。
+
 **响应 (HTTP 201)**: 创建的小区详情
 
-**说明**: `created_by` 字段自动设置为当前用户。
+```json
+{
+  "id": "uuid",
+  "name": "阳光花园",
+  "address": "北京市朝阳区xxx路100号",
+  "description": "高品质住宅小区",
+    "is_active": false,
+    "created_by": "当前用户UUID",
+    "created_by_phone": "13800138000",
+    "established_at": "2015-06-01",
+  "members_count": 0,
+  "created_at": "2026-07-27T10:00:00Z",
+  "updated_at": "2026-07-27T10:00:00Z"
+}
+```
+
+**说明**:
+- 非管理员创建后 `is_active` 为 `false`，用户可通过 `GET /communities/?mine=1` 查看审核进度
+- admin 在 Django Admin 后台的 Community 列表页可直接勾选 `is_active` 激活小区
 
 ---
 
@@ -466,7 +656,17 @@ GET /api/neighbor-hub/users/profile/550e8400-e29b-41d4-a716-446655440001/
 
 **权限**: `IsAuthenticated`
 
+**访问规则**:
+- 已激活的小区（`is_active=True`）：所有用户可查看
+- 未激活的小区（`is_active=False`）：仅创建者本人或管理员（`is_staff`）可查看
+
 **响应 (HTTP 200)**: 小区详情对象
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 404 | 小区不存在或无权查看（未激活且非创建者） | 默认 404 |
 
 ---
 
@@ -1496,9 +1696,13 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 ```
 1. 用户登录 → 获得 JWT Token
 2. GET /api/neighbor-hub/users/me/ → 获取当前用户 Profile
-3. 检查 is_verified 字段:
-   - false: 引导用户提交认证申请
-   - true: 可正常使用所有功能
+3. 检查 community 字段:
+   - null: 用户在中转站 → 展示选择小区/创建小区页面
+     a. 选择小区: GET /communities/ → POST /users/me/switch-community/ { community, join_note }
+     b. 创建小区: POST /communities/ → GET /communities/?mine=1 查看审核状态
+   - UUID: 用户已加入小区，检查 is_verified:
+     - false: 待业委会审核 → 展示"等待审核中"
+     - true: 可正常使用所有功能
 4. GET /api/neighbor-hub/topics/ → 浏览话题列表
 5. POST /api/neighbor-hub/topics/ → 创建话题（需已认证）
 6. 参与互动: 点赞、评论、订阅
@@ -1615,10 +1819,35 @@ const deleteTopicImage = async (topicId, imageId) => {
 
 // ==================== 其他接口 ====================
 
-// 获取小区列表
+// 获取小区列表（仅已激活的）
 const getCommunities = async () => {
   const { data } = await axios.get('/api/neighbor-hub/communities/')
   return data
+}
+
+// 查看自己创建的小区（含未激活，查看审核进度）
+const getMyCommunities = async () => {
+  const { data } = await axios.get('/api/neighbor-hub/communities/', {
+    params: { mine: 1 }
+  })
+  return data
+}
+
+// 创建小区（非管理员创建后 is_active=false，待 admin 审核）
+const createCommunity = async (communityData) => {
+  const { data } = await axios.post('/api/neighbor-hub/communities/', communityData)
+  return data
+  // { id, name, address, is_active: false, created_by: '当前用户UUID', ... }
+}
+
+// 切换/加入小区（附带 join_note）
+const switchCommunity = async (communityId, joinNote = '') => {
+  const { data } = await axios.post('/api/neighbor-hub/users/me/switch-community/', {
+    community: communityId,
+    join_note: joinNote
+  })
+  return data
+  // { message: '小区切换成功', data: {...}, meta: {...} }
 }
 
 // 记录邀请关系 - 被邀请用户登录成功后调用
@@ -1649,6 +1878,7 @@ const likeTopic = async (topicId) => {
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v2.3.0 | 2026-07-27 | 新增中转站流程（无小区用户选择小区/创建小区）；NeighborHubProfile 新增 `join_note` 字段（加入备注，供业委会审核参考）；创建小区接口权限改为 `IsAuthenticated`，非管理员创建的小区 `is_active=False` 待 admin 审核；小区列表新增 `?mine=1` 查询参数和 `created_by` 响应字段；小区详情补充访问控制规则 |
 | v2.2.0 | 2026-07-27 | 新增 POST `/communities/{id}/members/{user_id}/verify/` 认证用户接口（与 unverify 互逆）；移除 VerificationRequest 和 AppNotification 模型及相关接口 |
 | v2.1.0 | 2026-07-25 | 用户头像上传接口（POST /users/me/avatar/）；话题列表/详情返回 author_avatar 字段；话题列表返回 cover_image 字段（封面图 URL）；删除重复的 patch 方法 |
 | v2.0.0 | 2026-07-25 | 图片上传功能：新增草稿话题机制（POST /topics/draft/、POST /topics/{id}/publish/）；新增图片上传/列表/删除接口（基于阿里云 OSS）；新增 TopicImage 模型；Topic 移除 image_url 字段，改为多图模型；列表页排除草稿话题；详情页返回 images 字段 |
