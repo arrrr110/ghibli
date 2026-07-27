@@ -383,12 +383,18 @@ class Command(BaseCommand):
                     Topic.PosterStyle.EMOJI,
                     Topic.PosterStyle.MINIMAL,
                 ]),
+                is_draft=False,
+                published_at=timezone.now() - timedelta(
+                    days=random.randint(0, 30),
+                    hours=random.randint(0, 23),
+                    minutes=random.randint(0, 59),
+                ),
                 likes_count=random.randint(0, 50),
                 comments_count=random.randint(0, 30),
                 views_count=random.randint(10, 500),
                 status=random.choice([
                     Topic.Status.ACTIVE, Topic.Status.ACTIVE, Topic.Status.ACTIVE,
-                    Topic.Status.CLOSED, Topic.Status.PENDING,
+                    Topic.Status.CLOSED, Topic.Status.HIDDEN,
                 ]),
                 is_pinned=is_pinned,
             )
