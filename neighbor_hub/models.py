@@ -289,6 +289,21 @@ class TopicLike(models.Model):
         verbose_name_plural = verbose_name
 
 
+class CommentLike(models.Model):
+    """评论点赞记录"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    comment = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='comment_likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'neighbor_hub_comment_likes'
+        unique_together = ['comment', 'user']
+        verbose_name = '评论点赞'
+        verbose_name_plural = verbose_name
+
+
 class TopicSubscription(models.Model):
     """话题订阅/收藏记录
     

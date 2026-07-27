@@ -4,7 +4,7 @@
 > **认证方式**: JWT (Bearer Token)  
 > **数据格式**: JSON  
 > **最后更新时间**: 2026-07-27  
-> **文档版本**: v2.5.0
+> **文档版本**: v2.5.1
 
 ---
 
@@ -80,6 +80,7 @@ Authorization: Bearer <access_token>
 | 话题 | POST | `/topics/{id}/read/` | 已登录 + 已认证 | 标记已读 |
 | 话题 | GET | `/topics/{id}/comments/` | 已登录 | 获取评论列表 |
 | 话题 | POST | `/topics/{id}/comments/` | 已登录 + 已认证 | 添加评论 |
+| 话题 | POST | `/topics/{id}/comments/{comment_id}/like/` | 已登录 + 已认证 | 评论点赞/取消点赞 |
 | 话题 | POST | `/topics/{id}/pin/` | 已登录 + 业委会 | 置顶/取消置顶 |
 | 话题 | POST | `/topics/{id}/hide/` | 已登录 + 业委会 | 隐藏/取消隐藏 |
 | 话题 | POST | `/topics/{id}/close/` | 已登录 + 业委会 | 关闭/重新开启 |
@@ -1213,7 +1214,53 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 ---
 
-### 29. 置顶/取消置顶话题
+### 29. 评论点赞/取消点赞
+
+**POST** `/topics/{id}/comments/{comment_id}/like/`
+
+**权限**: `IsAuthenticated` + `IsVerifiedUser`
+
+**功能说明**:
+- 切换评论的点赞状态（已点赞 → 取消，未点赞 → 新增）
+- 再次调用可取消点赞
+- 支持**乐观更新 + 服务端同步**：前端点击后立即更新 UI，服务端返回最新状态用于校正
+
+**URL参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | UUID | 是 | 话题 ID |
+| comment_id | UUID | 是 | 评论 ID |
+
+**响应 (HTTP 200)**:
+```json
+{
+  "liked": true,
+  "likes_count": 6
+}
+```
+
+**响应字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| liked | boolean | 当前用户是否已点赞（true=已点赞，false=已取消） |
+| likes_count | int | 该评论的总点赞数（同步后的准确值） |
+
+> **前端集成建议**：
+> 1. 用户点击点赞 → 前端立即更新 UI（乐观更新：`liked = !liked`, `likes_count += 1/-1`）
+> 2. 同时发起 POST 请求 → 服务端处理并返回最新状态
+> 3. 用服务端返回的 `liked` 和 `likes_count` 校正本地状态（处理并发冲突等边缘情况）
+
+**错误响应**:
+
+| HTTP | 场景 | 响应 |
+|------|------|------|
+| 404 | 评论不存在或不属于该话题 | `{"error": "评论不存在"}` |
+
+---
+
+### 30. 置顶/取消置顶话题
 
 **POST** `/topics/{id}/pin/`
 
@@ -1228,7 +1275,7 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 ---
 
-### 30. 隐藏/取消隐藏话题
+### 31. 隐藏/取消隐藏话题
 
 **POST** `/topics/{id}/hide/`
 
@@ -1245,7 +1292,7 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 ---
 
-### 31. 关闭/重新开启话题
+### 32. 关闭/重新开启话题
 
 **POST** `/topics/{id}/close/`
 
@@ -1458,6 +1505,7 @@ GET /topics/?cursor=cD0yMDI2LTA3LTE5&page_size=10
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| **v2.5.1** | 2026-07-28 | **新增** 评论点赞接口 `POST /topics/{id}/comments/{comment_id}/like/`；新增 `CommentLike` 模型（unique_together: comment+user）；支持乐观更新 + 服务端同步模式 |
 | **v2.5.0** | 2026-07-27 | **新增** 扁平化回复模型：`Comment` 模型新增 `reply_to` 字段（回复目标用户）；`CommentSerializer` 新增 `reply_to` / `reply_to_nickname` 字段；POST 评论时后端自动规范化 `parent` 为根评论 + 设置 `reply_to`；所有回复平铺在根评论下，支持任意用户间回复对话；预取查询补充 `reply_to` 关联避免 N+1 |
 | **v2.4.0** | 2026-07-27 | **新增** `GET /users/me/stats/` 用户聚合统计接口（ProfilePage 主接口）；**新增** `filter=mine` 话题筛选（SubscriptionsPage「我的话题」Tab）；`GET /users/me/` 返回值附带 `my_communities` 字段（减少 WaitingVerificationPage 额外请求）；`GET /invitations/` 响应增加 `invitee_nickname` 字段（被邀请人昵称）；**修复** CommunityViewSet 越权漏洞（业委会只能管理本小区）；**修复** CommunitySerializer N+1 查询（改用 annotate）；**修复** InvitationSerializer N+1 查询（select_related 预取双方 profile）；**优化** 删除 CurrentUserProfileView 重复定义；移除4处冗余手动权限检查；简化 NeighborHubProfileSerializer（read_only_fields 替代手动 update）；删除 CommunityViewSet 类级冗余 queryset |
 | v2.3.0 | 2026-07-27 | 新增中转站流程；NeighborHubProfile 新增 `join_note` 字段；创建小区接口权限改为 `IsAuthenticated`；小区列表新增 `?mine=1` 查询参数 |

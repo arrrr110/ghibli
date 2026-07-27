@@ -21,6 +21,7 @@ from .models import (
     Topic,
     TopicImage,
     Comment,
+    CommentLike,
     TopicLike,
     TopicSubscription,
     TopicReadRecord,
@@ -920,7 +921,7 @@ class TopicViewSet(ModelViewSet):
             return [IsAuthenticated(), IsVerifiedUser()]
         if self.action in ('pin', 'hide', 'close'):
             return [IsAuthenticated(), IsCommitteeMember()]
-        if self.action in ('like', 'subscribe', 'read'):
+        if self.action in ('like', 'like_comment', 'subscribe', 'read'):
             return [IsAuthenticated(), IsVerifiedUser()]
         # update, partial_update, destroy → 作者或业委会
         return [IsAuthenticated(), IsCommitteeOrAuthor()]
@@ -1205,7 +1206,38 @@ class TopicViewSet(ModelViewSet):
         topic.likes_count += 1
         topic.save(update_fields=['likes_count'])
         return Response({'liked': True, 'likes_count': topic.likes_count})
-    
+
+    @action(detail=True, methods=['post'], url_path=r'comments/(?P<comment_id>[^/.]+)/like')
+    def like_comment(self, request, pk=None, comment_id=None):
+        """评论点赞/取消点赞
+
+        POST /api/neighbor-hub/topics/{id}/comments/{comment_id}/like/
+
+        乐观更新 + 服务端同步：前端点击后立即更新 UI，服务端返回最新状态用于校正。
+        再次调用可取消点赞。
+        """
+        topic = self.get_object()
+        try:
+            comment = Comment.objects.get(id=comment_id, topic=topic, is_active=True)
+        except Comment.DoesNotExist:
+            return Response(
+                {'error': '评论不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        like, created = CommentLike.objects.get_or_create(
+            comment=comment, user=request.user
+        )
+        if not created:
+            # 已点赞，取消点赞
+            like.delete()
+            comment.likes_count = max(0, comment.likes_count - 1)
+            comment.save(update_fields=['likes_count'])
+            return Response({'liked': False, 'likes_count': comment.likes_count})
+        # 新增点赞
+        comment.likes_count += 1
+        comment.save(update_fields=['likes_count'])
+        return Response({'liked': True, 'likes_count': comment.likes_count})
+
     @action(detail=True, methods=['post'])
     def subscribe(self, request, pk=None):
         """订阅/取消订阅"""
