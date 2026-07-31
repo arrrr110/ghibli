@@ -296,6 +296,7 @@ class SwitchCommunityView(APIView):
             profile.verification_note = ''
             profile.join_note = ''
             profile.building = ''
+            profile.invited_by = None
             profile.save()
             
             response_serializer = NeighborHubProfileSerializer(
@@ -324,7 +325,7 @@ class SwitchCommunityView(APIView):
         # 获取目标小区
         target_community = Community.objects.get(id=target_community_id)
         
-        # 执行小区切换：重置认证状态
+        # 执行小区切换：重置认证状态，清除旧邀请关系
         profile.community = target_community
         profile.is_verified = False
         profile.role = NeighborHubProfile.Role.OWNER
@@ -332,6 +333,7 @@ class SwitchCommunityView(APIView):
         profile.verified_at = None
         profile.verification_note = ''
         profile.join_note = join_note
+        profile.invited_by = None
         profile.save()
         
         # 返回更新后的 Profile
