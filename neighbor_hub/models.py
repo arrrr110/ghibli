@@ -366,9 +366,14 @@ class Invitation(models.Model):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     inviter = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_invitations'
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='sent_invitations'
     )
-    inviter_community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name='sent_invitations')
+    inviter_community = models.ForeignKey(
+        Community, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='sent_invitations', verbose_name='邀请人所属小区'
+    )
     invitee = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='received_invitations'
@@ -385,8 +390,9 @@ class Invitation(models.Model):
         verbose_name_plural = verbose_name
     
     def __str__(self):
+        inviter_info = self.inviter.username if self.inviter else '已删除用户'
         invitee_info = self.invitee.username if self.invitee else '未注册'
-        return f"{self.inviter.username} -> {invitee_info}"
+        return f"{inviter_info} -> {invitee_info}"
     
     def accept(self, user):
         """接受邀请"""
