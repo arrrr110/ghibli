@@ -165,12 +165,14 @@ POST /api/users/auth/phone-login/?invited_by=550e8400-e29b-41d4-a716-44665544000
     "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
     "expires_in": 1800,
-    "neighbor_hub_profile": {
-        "id": "550e8400-e29b-41d4-a716-446655440001",
-        "nickname": "138****8000",
-        "is_new_profile": true,
-        "is_profile_complete": false,
-        "needs_completion": true
+    "app_data": {
+        "neighbor_hub": {
+            "id": "550e8400-...",
+            "nickname": "test",
+            "is_new_profile": true,
+            "is_profile_complete": false,
+            "needs_completion": true
+        }
     }
 }
 ```

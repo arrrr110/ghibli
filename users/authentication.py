@@ -13,6 +13,7 @@ from .serializers import (
     SendSmsCodeSerializer,
     PhoneCodeLoginSerializer,
 )
+from .signals import user_registered
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +34,36 @@ def generate_tokens_for_user(user, app_name=''):
     }
 
 
-def get_or_create_user_by_phone(phone, app_name, nickname='', invited_by=None):
+# ──────────────────────────────────────────────
+# 信号返回值收集
+# ──────────────────────────────────────────────
+# 信号发送后，各接收方可选择返回 {'app_name': ..., 'profile_data': {...}}
+# users 只做通用收集和透传，不关心 profile_data 里有什么字段
+#
+
+def _collect_app_data(responses):
+    """收集信号接收方返回的应用数据，汇总为 {app_name: profile_data}"""
+    app_data = {}
+    for receiver, response in responses:
+        if response and isinstance(response, dict) and 'app_name' in response:
+            app_data[response['app_name']] = response.get('profile_data', {})
+    return app_data
+
+
+# ──────────────────────────────────────────────
+
+
+def get_or_create_user_by_phone(phone, app_name, **kwargs):
     """
     通过手机号获取或创建用户
-    同时创建对应应用的 Profile 和 NeighborHubProfile（如果是neighbor_hub应用）
+    同时创建对应应用的 UserAppProfile
+    各业务应用的档案通过 user_registered 信号创建，users 不关心谁在监听
     
     Args:
         phone: 手机号
         app_name: 应用名称
-        nickname: 昵称
-        invited_by: 邀请人用户ID（可选）
+        **kwargs: 前端透传的扩展参数，原样转发给信号接收方
+                 （如 invited_by, nickname 等，由各应用自行解包校验）
     """
     with transaction.atomic():
         # 查找或创建用户
@@ -61,51 +82,23 @@ def get_or_create_user_by_phone(phone, app_name, nickname='', invited_by=None):
             app_name=app_name,
         )
 
-        # 如果是neighbor_hub应用，自动创建基础NeighborHubProfile
-        neighbor_profile = None
-        neighbor_profile_created = False
-        if app_name == 'neighbor_hub':
-            try:
-                from neighbor_hub.models import NeighborHubProfile
-                
-                # 基础创建参数（默认业主身份）
-                defaults = {
-                    'nickname': nickname or f'{phone[:3]}****{phone[-4:]}',
-                    'role': NeighborHubProfile.Role.OWNER,
-                }
-                
-                # 有邀请人：一次性查询并设置所有关联字段
-                if invited_by:
-                    try:
-                        inviter = User.objects.select_related('neighbor_hub_profile').get(id=invited_by)
-                        inviter_profile = getattr(inviter, 'neighbor_hub_profile', None)
-                        
-                        if inviter_profile and inviter_profile.community_id:
-                            # 邀请人小区即为新用户小区
-                            defaults['community'] = inviter_profile.community
-                            # 邀请人关系
-                            defaults['invited_by'] = inviter
-                            logger.info(
-                                f'被邀请用户 {user.id} → 小区 {inviter_profile.community_id}, '
-                                f'邀请人 {invited_by}'
-                            )
-                        else:
-                            logger.warning(f'邀请人 {invited_by} 无小区档案，无法复制小区信息')
-                    except User.DoesNotExist:
-                        logger.warning(f'邀请人不存在: {invited_by}')
-                
-                # 一次 get_or_create 搞定，无需二次更新
-                neighbor_profile, neighbor_profile_created = NeighborHubProfile.objects.get_or_create(
-                    user=user,
-                    defaults=defaults
-                )
-                    
-            except ImportError:
-                logger.warning('neighbor_hub应用不可用，跳过创建NeighborHubProfile')
-            except Exception as e:
-                logger.error(f'创建NeighborHubProfile失败: {e}')
+        # 新用户：发送注册信号，由各业务应用监听并创建各自档案
+        # 收集各应用返回的 profile 数据，透传给前端
+        app_data = {}
+        if user_created:
+            print(f"\n>>> [users] 手机注册: 准备发送 user_registered 信号")
+            print(f"    user={user.id} ({user.username}), app_name={app_name}")
+            print(f"    kwargs={kwargs}")
+            responses = user_registered.send(
+                sender=User,
+                user=user,
+                app_name=app_name,
+                **kwargs,
+            )
+            app_data = _collect_app_data(responses)
+            print(f"<<< [users] 信号发送完毕, app_data={app_data}")
         
-        return user, user_created, profile, profile_created, neighbor_profile, neighbor_profile_created
+        return user, user_created, profile, profile_created, app_data
 
 
 def verify_sms_code(phone, code, purpose='login'):
@@ -176,6 +169,7 @@ class PhoneLoginView(APIView):
       - phone: 手机号（必填）
       - code: 验证码（必填）
       - app_name: 应用标识（可选，默认 neighbor_hub）
+      - extra: 应用自定义扩展参数（可选，如 {"invited_by": "uuid"}）
       
     功能：如果手机号不存在则自动注册并登录，如果存在则直接登录。
     """
@@ -191,20 +185,15 @@ class PhoneLoginView(APIView):
         phone = serializer.validated_data['phone']
         code = serializer.validated_data['code']
         app_name = serializer.validated_data.get('app_name', '')
-        invited_by = serializer.validated_data.get('invited_by')
+        extra = serializer.validated_data.get('extra', {})
 
         # 验证验证码
         success, msg = verify_sms_code(phone, code, purpose='login')
         if not success:
             return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 获取或创建用户（get_or_create），传递邀请人信息
-        # 优先使用请求体中的invited_by，如果没有则从URL参数中获取
-        url_invited_by = request.GET.get('invited_by') if hasattr(request, 'GET') else None
-        final_invited_by = invited_by or url_invited_by
-        
-        user, user_created, profile, profile_created, neighbor_profile, neighbor_profile_created = get_or_create_user_by_phone(
-            phone, app_name, invited_by=final_invited_by
+        user, user_created, profile, profile_created, app_data = get_or_create_user_by_phone(
+            phone, app_name, **extra
         )
 
         # 记录登录
@@ -228,15 +217,10 @@ class PhoneLoginView(APIView):
             **tokens,
         }
 
-        # 添加neighbor_hub档案信息（如果是neighbor_hub应用）
-        if app_name == 'neighbor_hub' and neighbor_profile:
-            response_data['neighbor_hub_profile'] = {
-                'id': str(neighbor_profile.id),
-                'nickname': neighbor_profile.nickname,
-                'is_new_profile': neighbor_profile_created,
-                'is_profile_complete': bool(neighbor_profile.community),  # 有小区信息表示档案完整
-                'needs_completion': not bool(neighbor_profile.community),  # 需要完善档案
-            }
+        # 透传各业务应用返回的 profile 数据
+        # users 不关心 app_data 里有什么，由各业务应用的信号处理器自行决定
+        if app_data:
+            response_data['app_data'] = app_data
 
         # 新用户返回 201，老用户返回 200
         return Response(response_data, status=status.HTTP_201_CREATED if user_created else status.HTTP_200_OK)
