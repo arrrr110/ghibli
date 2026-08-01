@@ -316,20 +316,6 @@ class TopicCreateSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class InvitationCreateSerializer(serializers.Serializer):
-    """创建邀请序列化器 - 前端传入 inviter（邀请人 user_id）"""
-    inviter = serializers.UUIDField(required=True, help_text="邀请人 user_id")
-    
-    def validate_inviter(self, value):
-        """验证邀请人是否存在"""
-        from users.models import User
-        try:
-            User.objects.get(id=value)
-        except User.DoesNotExist:
-            raise serializers.ValidationError("邀请人不存在")
-        return value
-
-
 class InvitationSerializer(serializers.ModelSerializer):
     """邀请记录序列化器"""
     inviter_nickname = serializers.SerializerMethodField()

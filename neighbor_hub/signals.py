@@ -8,9 +8,11 @@ neighbor_hub 应用的信号处理器
 """
 import logging
 from django.dispatch import receiver
+from django.utils import timezone
+from datetime import timedelta
 from users.signals import user_registered
 from users.models import User
-from .models import NeighborHubProfile
+from .models import NeighborHubProfile, Invitation
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ def on_user_registered(sender, user, app_name, **kwargs):
         'role': NeighborHubProfile.Role.OWNER,
     }
 
-    # 邀请人处理：复制邀请人的小区信息
+    # 邀请人处理：复制邀请人的小区信息，并创建邀请记录
     invited_by_id = kwargs.get('invited_by')
     if invited_by_id:
         try:
@@ -68,6 +70,19 @@ def on_user_registered(sender, user, app_name, **kwargs):
                     f'被邀请用户 {user.id} → 小区 {inviter_profile.community_id}, '
                     f'邀请人 {invited_by_id}'
                 )
+
+                # 注册即接受邀请，自动创建已接受的邀请记录
+                Invitation.objects.get_or_create(
+                    inviter=inviter,
+                    invitee=user,
+                    defaults={
+                        'inviter_community': inviter_profile.community,
+                        'status': Invitation.Status.ACCEPTED,
+                        'accepted_at': timezone.now(),
+                        'expires_at': timezone.now() + timedelta(days=30),
+                    },
+                )
+                logger.info(f'邀请记录已创建: 邀请人 {invited_by_id} → 被邀请人 {user.id}')
             else:
                 logger.warning(f'邀请人 {invited_by_id} 无小区档案，无法复制小区信息')
         except User.DoesNotExist:

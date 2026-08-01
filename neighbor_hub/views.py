@@ -13,7 +13,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.generics import GenericAPIView
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, GenericViewSet
+from rest_framework import mixins
 
 from .models import (
     Community,
@@ -44,7 +45,6 @@ from .serializers import (
     AvatarUploadSerializer,
     CommentSerializer,
     InvitationSerializer,
-    InvitationCreateSerializer,
     SwitchCommunitySerializer,
 )
 
@@ -1380,26 +1380,28 @@ class TopicViewSet(ModelViewSet):
         return Response({'status': topic.status})
 
 
-class InvitationViewSet(ModelViewSet):
+class InvitationViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    GenericViewSet,
+):
     """
-    邀请管理 - 简化版支持H5分享链接和二维码
+    邀请管理（只读 + 删除）
     
-    GET    /api/neighbor-hub/invitations/             我的邀请记录（作为邀请人）
-    POST   /api/neighbor-hub/invitations/             创建邀请记录（前端传入 inviter user_id）
+    GET    /api/neighbor-hub/invitations/             我的邀请记录（作为邀请人或被邀请人）
+    GET    /api/neighbor-hub/invitations/{id}/        邀请记录详情
     DELETE /api/neighbor-hub/invitations/{id}/        删除邀请记录
+    
+    邀请记录在用户注册时由信号处理器自动创建，无需手动调用 POST 创建。
     
     流程:
     1. 前端生成链接: https://域名.com/join?inviter={user_id}
-    2. 被邀请用户点击链接注册/登录
-    3. 前端检测到 URL 参数 inviter
-    4. 前端调用 POST /invitations/ {"inviter": "xxx"} 记录邀请关系
+    2. 被邀请用户点击链接注册/登录，前端将 invited_by 放入 extra 参数
+    3. 后端注册成功后，信号处理器自动创建 NeighborHubProfile 和 Invitation 记录
     """
     permission_classes = [IsAuthenticated]
-    
-    def get_serializer_class(self):
-        if self.action == 'create':
-            return InvitationCreateSerializer
-        return InvitationSerializer
+    serializer_class = InvitationSerializer
     
     def get_queryset(self):
         """获取当前用户相关的邀请记录（作为邀请人或被邀请人）"""
@@ -1410,52 +1412,4 @@ class InvitationViewSet(ModelViewSet):
             'inviter', 'inviter__neighbor_hub_profile',
             'invitee', 'invitee__neighbor_hub_profile',
         )
-    
-    def create(self, request, *args, **kwargs):
-        """创建邀请记录 - 前端传入 inviter（邀请人 user_id）"""
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        inviter_id = serializer.validated_data['inviter']
-        
-        # 不能邀请自己
-        if str(inviter_id) == str(request.user.id):
-            return Response(
-                {'error': '不能邀请自己'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # 获取邀请人信息
-        from users.models import User
-        try:
-            inviter = User.objects.select_related('neighbor_hub_profile').get(id=inviter_id)
-        except User.DoesNotExist:
-            return Response(
-                {'error': '邀请人不存在'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # 获取邀请人的小区
-        inviter_profile = getattr(inviter, 'neighbor_hub_profile', None)
-        community = inviter_profile.community if inviter_profile else None
-        
-        # 创建邀请记录 - 直接设为已接受状态
-        invitation = Invitation.objects.create(
-            inviter=inviter,
-            invitee=request.user,
-            inviter_community=community,
-            status=Invitation.Status.ACCEPTED,
-            accepted_at=timezone.now(),
-            expires_at=timezone.now() + timedelta(days=30)
-        )
-        
-        # 重新查询以预取关联数据，避免序列化时 N+1
-        invitation = Invitation.objects.select_related(
-            'inviter', 'inviter__neighbor_hub_profile',
-            'invitee', 'invitee__neighbor_hub_profile',
-            'inviter_community',
-        ).get(id=invitation.id)
-        
-        response_serializer = InvitationSerializer(invitation, context={'request': request})
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
